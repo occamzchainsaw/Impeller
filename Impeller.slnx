@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Impeller.App.ViewModels/Impeller.App.ViewModels.csproj" />
+    <Project Path="src/Impeller.Core.Abstractions/Impeller.Core.Abstractions.csproj" />
+    <Project Path="src/Impeller.Core.Engine/Impeller.Core.Engine.csproj" />
+    <Project Path="src/Impeller.Core.Persistence/Impeller.Core.Persistence.csproj" />
+    <Project Path="src/Impeller.EngineService/Impeller.EngineService.csproj" />
+    <Project Path="src/Impeller.Hardware.Lhm/Impeller.Hardware.Lhm.csproj" />
+    <Project Path="src/Impeller.Ipc.Contracts/Impeller.Ipc.Contracts.csproj" />
+    <Project Path="src/Impeller.Plugins.Abstractions/Impeller.Plugins.Abstractions.csproj" />
+    <Project Path="src/Impeller.Plugins.Host/Impeller.Plugins.Host.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Impeller.Core.Engine.Tests/Impeller.Core.Engine.Tests.csproj" />
+  </Folder>
+</Solution>
