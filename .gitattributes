@@ -1,0 +1,22 @@
+# Normalize to LF in the repository; check out native line endings on Windows.
+* text=auto
+
+*.cs        text diff=csharp
+*.csproj    text
+*.props     text
+*.targets   text
+*.slnx      text
+*.json      text
+*.xaml      text
+*.md        text
+*.yml       text
+*.yaml      text
+
+# Binary assets: never touch these.
+*.png       binary
+*.ico       binary
+*.jpg       binary
+*.pfx       binary
+*.snk       binary
+*.dll       binary
+*.exe       binary

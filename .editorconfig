@@ -45,7 +45,15 @@ dotnet_naming_style.underscore_prefix.required_prefix = _
 dotnet_naming_style.underscore_prefix.capitalization = camel_case
 
 # --- analyzer noise we deliberately accept ---
+# CA1707: underscores in member names. Test methods read as sentences on purpose; see tests/ below.
 # CA1848: use LoggerMessage delegates. Worth it in the tick loop, overkill everywhere else.
 dotnet_diagnostic.CA1848.severity = none
 # CA1031: catching general Exception. The engine and plugin host must not die on plugin faults.
 dotnet_diagnostic.CA1031.severity = none
+
+[tests/**/*.cs]
+# Test names are written as sentences (Change_inside_the_deadband_is_ignored), which reads far
+# better in a failure report than the PascalCase equivalent.
+dotnet_diagnostic.CA1707.severity = none
+# Tests deliberately construct throwaway objects and assert on locals.
+dotnet_diagnostic.CA1861.severity = none
