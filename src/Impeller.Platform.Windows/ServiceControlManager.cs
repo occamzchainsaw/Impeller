@@ -2,7 +2,7 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 
-namespace Impeller.EngineService;
+namespace Impeller.Platform.Windows;
 
 /// <summary>
 /// Installs, removes and queries the Impeller engine service.

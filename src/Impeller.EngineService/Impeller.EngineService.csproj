@@ -8,7 +8,6 @@
     <Description>Elevated headless engine: owns the tick loop, hardware access, and the plugin host.</Description>
     <!-- Required by [LibraryImport]: the generated P/Invoke marshalling for the Service Control
          Manager uses pointers. No hand-written unsafe code exists in this project. -->
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
@@ -23,6 +22,7 @@
     <ProjectReference Include="..\Impeller.Hardware.Lhm\Impeller.Hardware.Lhm.csproj" />
     <ProjectReference Include="..\Impeller.Plugins.Host\Impeller.Plugins.Host.csproj" />
     <ProjectReference Include="..\Impeller.Ipc.Contracts\Impeller.Ipc.Contracts.csproj" />
+    <ProjectReference Include="..\Impeller.Platform.Windows\Impeller.Platform.Windows.csproj" />
   </ItemGroup>
 
 </Project>

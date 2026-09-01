@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -58,6 +58,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Impeller.App.ViewModels\Impeller.App.ViewModels.csproj" />
+    <ProjectReference Include="..\Impeller.Platform.Windows\Impeller.Platform.Windows.csproj" />
     <ProjectReference Include="..\Impeller.Core.Abstractions\Impeller.Core.Abstractions.csproj" />
   </ItemGroup>
 

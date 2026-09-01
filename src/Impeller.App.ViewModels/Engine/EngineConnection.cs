@@ -137,7 +137,26 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
 
         while (!cancellationToken.IsCancellationRequested)
         {
-            if (await TryConnectAsync(cancellationToken).ConfigureAwait(false))
+            bool wasConnected;
+
+            try
+            {
+                wasConnected = await TryConnectAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                // Whatever went wrong, the loop keeps trying. A shell that silently stops
+                // reconnecting looks identical to an engine that is down, and the user would have
+                // no way to tell which they were looking at.
+                SetState(EngineConnectionState.Disconnected, $"Could not reach the engine: {ex.Message}");
+                wasConnected = false;
+            }
+
+            if (wasConnected)
             {
                 // Connected and then dropped: try again promptly, since a service restart is the
                 // most likely cause and it will be back in a second or two.
@@ -255,7 +274,7 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
     /// </summary>
     private void ReportUnreachable()
     {
-        if (IsEngineInstalled is { } installed && !installed())
+        if (!IsInstalled())
         {
             SetState(
                 EngineConnectionState.NotInstalled,
@@ -266,6 +285,33 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
         SetState(
             EngineConnectionState.Disconnected,
             "The engine service is not running. Fans are being left to the firmware.");
+    }
+
+    /// <summary>
+    /// Asks the supplied probe whether the engine is installed, and assumes it is when the probe
+    /// cannot say.
+    /// </summary>
+    /// <remarks>
+    /// The probe comes from outside this class and reaches the service control manager, so it can
+    /// throw. It must not be able to stop the reconnect loop over a cosmetic question: the worst
+    /// outcome of guessing wrong here is a slightly less helpful message, and the worst outcome of
+    /// letting it escape is a shell that never reconnects.
+    /// </remarks>
+    private bool IsInstalled()
+    {
+        if (IsEngineInstalled is not { } probe)
+        {
+            return true;
+        }
+
+        try
+        {
+            return probe();
+        }
+        catch (Exception)
+        {
+            return true;
+        }
     }
 
     private void SetState(EngineConnectionState state, string message)

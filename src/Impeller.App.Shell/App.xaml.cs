@@ -1,5 +1,6 @@
 using Impeller.App.ViewModels;
 using Impeller.App.ViewModels.Engine;
+using Impeller.Platform.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 
@@ -43,7 +44,14 @@ public partial class App : Application
 
         // One connection for the whole app: the main window and the tray icon are two views of the
         // same engine, not two clients competing for it.
-        services.AddSingleton<EngineConnection>();
+        services.AddSingleton(_ => new EngineConnection
+        {
+            // Lets the shell tell "the engine is not installed" apart from "it is installed and
+            // not running". Only the first of those needs the user to do something, and a first
+            // run that reports the wrong one sends people looking for a service that was never
+            // there. Querying the service's status needs no elevation; installing it does.
+            IsEngineInstalled = ServiceControlManager.IsInstalled,
+        });
 
         // Transient: a page navigated away from is discarded along with its view model, so
         // returning to it starts from a clean state rather than one the user last left behind.

@@ -8,6 +8,7 @@
     <Project Path="src/Impeller.EngineService/Impeller.EngineService.csproj" />
     <Project Path="src/Impeller.Hardware.Lhm/Impeller.Hardware.Lhm.csproj" />
     <Project Path="src/Impeller.Ipc.Contracts/Impeller.Ipc.Contracts.csproj" />
+    <Project Path="src/Impeller.Platform.Windows/Impeller.Platform.Windows.csproj" />
     <Project Path="src/Impeller.Plugins.Abstractions/Impeller.Plugins.Abstractions.csproj" />
     <Project Path="src/Impeller.Plugins.Host/Impeller.Plugins.Host.csproj" />
   </Folder>
