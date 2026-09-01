@@ -1,0 +1,22 @@
+<Project>
+
+  <!--
+    Impeller has no 32-bit story. LibreHardwareMonitor's kernel driver must match the bitness of
+    the process that loads it, the engine service runs AnyCPU (so 64-bit on 64-bit Windows), and
+    a 32-bit shell talking to a 64-bit service is a mismatch nobody would look for.
+
+    This exists because the mismatch is silent by default. The WinUI template shipped
+    <Platforms>x86;x64;ARM64</Platforms>, `dotnet sln add` pinned the solution to the first entry,
+    and the only visible symptom was a "win-x86" segment in an output path. Failing the build
+    turns that into something you cannot walk past.
+
+    ARM64 is deliberately allowed; only x86 is rejected.
+  -->
+  <Target Name="ImpellerRejectX86"
+          BeforeTargets="Build;Publish"
+          Condition="'$(PlatformTarget)' == 'x86' Or '$(Platform)' == 'x86' Or '$(RuntimeIdentifier)' == 'win-x86'">
+    <Error Code="IMP0001"
+           Text="Impeller does not support 32-bit builds (Platform='$(Platform)', PlatformTarget='$(PlatformTarget)', RuntimeIdentifier='$(RuntimeIdentifier)'). Check for a stray &lt;Platform&gt; element in Impeller.slnx or a &lt;Platforms&gt; list in the project." />
+  </Target>
+
+</Project>
