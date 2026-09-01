@@ -1,6 +1,7 @@
 using Impeller.Core.Abstractions;
 using Impeller.Core.Engine;
 using Impeller.Core.Engine.Configuration;
+using Impeller.Core.Engine.Sensors;
 using Impeller.Core.Persistence;
 using Impeller.EngineService;
 using Impeller.Hardware.Lhm;
@@ -59,6 +60,21 @@ builder.Services.AddSingleton<ISensorIdentityMap>(
 
 builder.Services.Configure<LhmOptions>(builder.Configuration.GetSection(LhmOptions.SectionName));
 builder.Services.AddSingleton<ISensorProvider, LhmSensorProvider>();
+
+// The engine's own computed sensors, exposed through the same interface as the hardware backends
+// so that nothing downstream has to know the difference. Registered last so it refreshes after
+// the hardware it reads — the registry enforces that, but the order here says why.
+builder.Services.AddSingleton(sp =>
+{
+    var provider = new CustomSensorProvider(sp.GetRequiredService<TimeProvider>())
+    {
+        Registry = sp.GetRequiredService<ISensorRegistry>(),
+    };
+
+    return provider;
+});
+
+builder.Services.AddSingleton<ISensorProvider>(sp => sp.GetRequiredService<CustomSensorProvider>());
 
 builder.Services.AddHostedService<EngineWorker>();
 

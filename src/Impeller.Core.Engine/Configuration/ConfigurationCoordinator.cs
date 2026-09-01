@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Impeller.Core.Abstractions;
 using Impeller.Core.Abstractions.Configuration;
+using Impeller.Core.Engine.Sensors;
 using Impeller.Core.Persistence;
 
 namespace Impeller.Core.Engine.Configuration;
@@ -33,11 +34,13 @@ public sealed record ConfigurationChanged(
 public sealed class ConfigurationCoordinator(
     ConfigStore store,
     ControlLoop loop,
-    ISensorRegistry registry)
+    ISensorRegistry registry,
+    CustomSensorProvider? customSensors = null)
 {
     private readonly ConfigStore _store = store;
     private readonly ControlLoop _loop = loop;
     private readonly ISensorRegistry _registry = registry;
+    private readonly CustomSensorProvider? _customSensors = customSensors;
 
     /// <summary>The default configuration name, used when nothing else has been chosen.</summary>
     public const string DefaultName = "Default";
@@ -131,6 +134,10 @@ public sealed class ConfigurationCoordinator(
         {
             return validation;
         }
+
+        // Custom sensors first: a curve reading one has to find it in the registry by the time the
+        // loop is configured, or every such curve would spend its first tick with no input.
+        _customSensors?.SetDefinitions(configuration.CustomSensors);
 
         var curves = configuration.Curves.Select(CurveFactory.Create).ToList();
         var bindings = configuration.Controls.Select(CurveFactory.CreateBinding).ToList();

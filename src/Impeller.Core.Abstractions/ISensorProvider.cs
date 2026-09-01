@@ -55,6 +55,18 @@ public interface ISensorProvider : IAsyncDisposable
     event EventHandler? TopologyChanged;
 }
 
+/// <summary>
+/// A provider whose sensors are computed from other providers' sensors rather than read from
+/// hardware.
+/// </summary>
+/// <remarks>
+/// The registry refreshes these after everything else, and one at a time. Both matter: a sensor
+/// derived from a temperature that has not been re-read yet would lag a tick behind the hardware
+/// it claims to describe, and one derived from another derived sensor would lag further still. The
+/// ordering makes a chain of them correct within a single tick.
+/// </remarks>
+public interface IDerivedSensorProvider : ISensorProvider;
+
 /// <summary>The outcome of bringing a provider up.</summary>
 /// <param name="Succeeded">Whether the provider is usable at all.</param>
 /// <param name="SensorCount">How many sensors were enumerated.</param>

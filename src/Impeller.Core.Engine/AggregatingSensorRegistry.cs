@@ -122,7 +122,15 @@ public sealed class AggregatingSensorRegistry : ISensorRegistry, IAsyncDisposabl
         }
 
         var state = new ProviderState(provider) { LastResult = result };
-        provider.TopologyChanged += (_, _) => ProviderTopologyChanged?.Invoke(this, provider);
+
+        // Reindex before telling anyone. A provider announcing new hardware and the registry still
+        // not knowing about it is a gap somebody would eventually have to debug: a curve pointed at
+        // a sensor that demonstrably exists, reading nothing.
+        provider.TopologyChanged += (_, _) =>
+        {
+            Reindex();
+            ProviderTopologyChanged?.Invoke(this, provider);
+        };
 
         lock (_gate)
         {
@@ -157,27 +165,49 @@ public sealed class AggregatingSensorRegistry : ISensorRegistry, IAsyncDisposabl
 
         var faults = new Dictionary<string, Exception>();
 
-        // Refreshed concurrently: a slow provider should not delay a fast one within the same tick.
-        var refreshes = due.Select(async state =>
+        // Hardware first, concurrently: a slow provider should not delay a fast one within the
+        // same tick.
+        var hardware = due.Where(state => state.Provider is not IDerivedSensorProvider);
+
+        await Task.WhenAll(hardware.Select(state => RefreshOneAsync(state, now, faults, cancellationToken)))
+            .ConfigureAwait(false);
+
+        // Then anything computed from those, one at a time and in registration order. A sensor
+        // derived from a reading that had not been taken yet would lag a tick behind the hardware
+        // it claims to describe, and a chain of them would lag further still.
+        foreach (var state in due.Where(state => state.Provider is IDerivedSensorProvider))
         {
-            try
-            {
-                await state.Provider.RefreshAsync(cancellationToken).ConfigureAwait(false);
-                state.MarkRefreshed(now);
-            }
-            catch (Exception ex)
-            {
-                state.MarkRefreshed(now);
+            await RefreshOneAsync(state, now, faults, cancellationToken).ConfigureAwait(false);
+        }
 
-                lock (faults)
-                {
-                    faults[state.Provider.ProviderId] = ex;
-                }
-            }
-        });
-
-        await Task.WhenAll(refreshes).ConfigureAwait(false);
         return faults;
+    }
+
+    /// <summary>
+    /// Refreshes one provider, recording rather than propagating whatever it throws, and marking
+    /// it refreshed either way so a consistently failing provider is not retried every tick.
+    /// </summary>
+    private static async Task RefreshOneAsync(
+        ProviderState state,
+        DateTimeOffset now,
+        Dictionary<string, Exception> faults,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await state.Provider.RefreshAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            lock (faults)
+            {
+                faults[state.Provider.ProviderId] = ex;
+            }
+        }
+        finally
+        {
+            state.MarkRefreshed(now);
+        }
     }
 
     /// <summary>

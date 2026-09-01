@@ -207,6 +207,87 @@ public static class ConfigurationValidator
                 CheckSensorPresent(source, configuration, registry, issues, $"Custom sensor '{sensor.Name}'");
             }
         }
+
+        CheckCustomSensorCycles(configuration, issues);
+    }
+
+    /// <summary>
+    /// Reports custom sensors that read themselves, directly or through others.
+    /// </summary>
+    /// <remarks>
+    /// An error rather than a warning: unlike a missing sensor, there is no defensible value to
+    /// produce. The provider drops anything caught in a loop, so letting this through would leave
+    /// curves silently reading nothing and no explanation anywhere.
+    /// </remarks>
+    private static void CheckCustomSensorCycles(
+        ImpellerConfiguration configuration,
+        List<ConfigurationIssue> issues)
+    {
+        var byId = new Dictionary<SensorId, CustomSensorDefinition>();
+
+        foreach (var sensor in configuration.CustomSensors)
+        {
+            byId.TryAdd(sensor.Id, sensor);
+        }
+
+        var finished = new Dictionary<SensorId, bool>();
+        var path = new List<SensorId>();
+        var cyclic = new HashSet<SensorId>();
+
+        foreach (var id in byId.Keys)
+        {
+            Walk(id, byId, finished, path, cyclic);
+        }
+
+        foreach (var id in cyclic)
+        {
+            issues.Add(new ConfigurationIssue(
+                ConfigurationSeverity.Error,
+                "custom-sensor-cycle",
+                $"Custom sensor '{byId[id].Name}' ends up reading itself, so it has no value to "
+                + "report."));
+        }
+    }
+
+    private static void Walk(
+        SensorId id,
+        Dictionary<SensorId, CustomSensorDefinition> byId,
+        Dictionary<SensorId, bool> finished,
+        List<SensorId> path,
+        HashSet<SensorId> cyclic)
+    {
+        if (finished.TryGetValue(id, out var done))
+        {
+            if (done)
+            {
+                return;
+            }
+
+            var from = path.IndexOf(id);
+
+            for (var i = from < 0 ? 0 : from; i < path.Count; i++)
+            {
+                cyclic.Add(path[i]);
+            }
+
+            return;
+        }
+
+        if (!byId.TryGetValue(id, out var sensor))
+        {
+            return;
+        }
+
+        finished[id] = false;
+        path.Add(id);
+
+        foreach (var source in sensor.Sources)
+        {
+            Walk(source, byId, finished, path, cyclic);
+        }
+
+        path.RemoveAt(path.Count - 1);
+        finished[id] = true;
     }
 
     private static void CheckBindings(
