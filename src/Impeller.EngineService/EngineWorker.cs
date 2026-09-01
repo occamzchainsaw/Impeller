@@ -1,5 +1,7 @@
 using Impeller.Core.Abstractions;
 using Impeller.Core.Engine;
+using Impeller.Core.Engine.Configuration;
+using Impeller.Core.Persistence;
 using Microsoft.Extensions.Options;
 
 namespace Impeller.EngineService;
@@ -24,6 +26,7 @@ public sealed partial class EngineWorker(
     ControlLoop loop,
     AggregatingSensorRegistry registry,
     IEnumerable<ISensorProvider> providers,
+    ConfigurationCoordinator configuration,
     TimeProvider timeProvider,
     IOptions<EngineOptions> options,
     ILogger<EngineWorker> logger) : BackgroundService
@@ -43,7 +46,13 @@ public sealed partial class EngineWorker(
     {
         await RegisterProvidersAsync(stoppingToken).ConfigureAwait(false);
 
+        // Providers first, then the configuration: a first run builds its control list from the
+        // hardware actually found, so there has to be hardware to find by the time it runs.
+        LoadConfiguration();
+
         Log.Starting(logger, _options.TickInterval, registry.ProviderCount);
+
+        StartWatchdog(stoppingToken);
 
         using var timer = new PeriodicTimer(_options.TickInterval, timeProvider);
 
@@ -67,6 +76,117 @@ public sealed partial class EngineWorker(
         }
 
         Log.Stopping(logger, TickCount);
+    }
+
+    /// <summary>
+    /// Loads the configuration that should be driving the fans.
+    /// </summary>
+    /// <remarks>
+    /// A configuration that cannot be read is logged and skipped rather than treated as fatal. The
+    /// engine then runs with nothing bound, which writes to no hardware at all — worse than
+    /// working, and considerably better than a service that refuses to start and leaves every fan
+    /// wherever the last thing to touch it left it.
+    /// </remarks>
+    private void LoadConfiguration()
+    {
+        try
+        {
+            var validation = configuration.Start(_options.ConfigurationName);
+
+            if (validation.HasErrors)
+            {
+                foreach (var issue in validation.Errors)
+                {
+                    Log.ConfigurationError(logger, issue.Code, issue.Message);
+                }
+
+                return;
+            }
+
+            foreach (var issue in validation.Warnings)
+            {
+                Log.ConfigurationWarning(logger, issue.Code, issue.Message);
+            }
+
+            var enabled = configuration.Current.Controls.Count(binding => binding.Enabled);
+
+            Log.ConfigurationLoaded(
+                logger,
+                configuration.CurrentName,
+                configuration.Current.Curves.Count,
+                enabled);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or ConfigMigrationException)
+        {
+            Log.ConfigurationFailed(logger, _options.ConfigurationName, ex);
+        }
+    }
+
+    /// <summary>
+    /// Starts the health check on a thread of its own.
+    /// </summary>
+    /// <remarks>
+    /// A thread rather than a timer, deliberately. The failure being watched for is a tick loop
+    /// that has stopped making progress, and one plausible cause of that is a starved or blocked
+    /// thread pool — which is exactly where a timer callback would be queued behind the problem.
+    /// </remarks>
+    private void StartWatchdog(CancellationToken stoppingToken)
+    {
+        if (_options.TickTimeout <= TimeSpan.Zero)
+        {
+            return;
+        }
+
+        var watchdog = new TickWatchdog(_options.TickTimeout);
+
+        // Check several times per timeout, so a trip is noticed promptly rather than up to a whole
+        // timeout after the fact.
+        var interval = _options.TickTimeout / 3;
+
+        new Thread(() => WatchdogLoop(watchdog, interval, stoppingToken))
+        {
+            IsBackground = true,
+            Name = "Impeller watchdog",
+        }.Start();
+    }
+
+    private void WatchdogLoop(TickWatchdog watchdog, TimeSpan interval, CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                if (stoppingToken.WaitHandle.WaitOne(interval))
+                {
+                    return;
+                }
+
+                switch (watchdog.Evaluate(timeProvider.GetUtcNow(), LastTickCompleted))
+                {
+                    case WatchdogVerdict.JustTripped:
+                        Log.WatchdogTripped(logger, _options.TickTimeout);
+
+                        // Engaged unconditionally, then logged. Fans must be driven to safety
+                        // whether or not anyone is listening to the log.
+                        var failsafe = loop.EngageFailsafe();
+                        Log.FailsafeApplied(logger, failsafe.ControlsWritten);
+                        break;
+
+                    case WatchdogVerdict.Recovered:
+                        Log.WatchdogRecovered(logger);
+                        loop.ClearFailsafe();
+                        break;
+
+                    default:
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                // The watchdog failing must be visible, and must not stop it watching.
+                Log.WatchdogFailed(logger, ex);
+            }
+        }
     }
 
     /// <summary>
@@ -228,6 +348,52 @@ public sealed partial class EngineWorker(
             Level = LogLevel.Error,
             Message = "{Provider} failed to initialise and will be unavailable.")]
         public static partial void ProviderFailed(ILogger logger, string provider, Exception exception);
+
+        [LoggerMessage(
+            EventId = 11,
+            Level = LogLevel.Information,
+            Message = "Configuration '{Name}' loaded: {CurveCount} curve(s), {EnabledCount} control(s) enabled.")]
+        public static partial void ConfigurationLoaded(
+            ILogger logger,
+            string name,
+            int curveCount,
+            int enabledCount);
+
+        [LoggerMessage(
+            EventId = 12,
+            Level = LogLevel.Warning,
+            Message = "Configuration issue [{Code}]: {Detail}")]
+        public static partial void ConfigurationWarning(ILogger logger, string code, string detail);
+
+        [LoggerMessage(
+            EventId = 13,
+            Level = LogLevel.Error,
+            Message = "Configuration rejected [{Code}]: {Detail}")]
+        public static partial void ConfigurationError(ILogger logger, string code, string detail);
+
+        [LoggerMessage(
+            EventId = 14,
+            Level = LogLevel.Error,
+            Message = "Configuration '{Name}' could not be loaded; running with nothing bound.")]
+        public static partial void ConfigurationFailed(ILogger logger, string name, Exception exception);
+
+        [LoggerMessage(
+            EventId = 15,
+            Level = LogLevel.Error,
+            Message = "No tick has completed within {Timeout}; engaging the failsafe.")]
+        public static partial void WatchdogTripped(ILogger logger, TimeSpan timeout);
+
+        [LoggerMessage(
+            EventId = 16,
+            Level = LogLevel.Information,
+            Message = "Ticks have resumed; returning controls to their curves.")]
+        public static partial void WatchdogRecovered(ILogger logger);
+
+        [LoggerMessage(
+            EventId = 17,
+            Level = LogLevel.Error,
+            Message = "The watchdog check itself failed; still watching.")]
+        public static partial void WatchdogFailed(ILogger logger, Exception exception);
 
         [LoggerMessage(
             EventId = 10,

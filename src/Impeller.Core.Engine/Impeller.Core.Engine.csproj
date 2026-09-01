@@ -2,6 +2,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Impeller.Core.Abstractions\Impeller.Core.Abstractions.csproj" />
+    <!--
+      The coordinator is what turns a stored document into a configured tick loop, so it needs
+      both halves. The dependency only runs this way: persistence knows nothing about the engine.
+    -->
+    <ProjectReference Include="..\Impeller.Core.Persistence\Impeller.Core.Persistence.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

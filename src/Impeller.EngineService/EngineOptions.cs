@@ -29,6 +29,15 @@ public sealed class EngineOptions
     public string? ConfigurationPath { get; set; }
 
     /// <summary>
+    /// Which named configuration to load at startup.
+    /// </summary>
+    /// <remarks>
+    /// Generated from the hardware present, with every control disabled, when it does not exist
+    /// yet. A first run leaves the machine exactly as it found it.
+    /// </remarks>
+    public string ConfigurationName { get; set; } = "Default";
+
+    /// <summary>
     /// Whether to drive controls to their failsafe duty when the engine stops normally.
     /// </summary>
     /// <remarks>
