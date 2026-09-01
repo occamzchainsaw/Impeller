@@ -1,8 +1,6 @@
 <Solution>
   <Folder Name="/src/">
-    <Project Path="src/Impeller.App.Shell/Impeller.App.Shell.csproj">
-      <Platform Project="x86" />
-    </Project>
+    <Project Path="src/Impeller.App.Shell/Impeller.App.Shell.csproj" />
     <Project Path="src/Impeller.App.ViewModels/Impeller.App.ViewModels.csproj" />
     <Project Path="src/Impeller.Core.Abstractions/Impeller.Core.Abstractions.csproj" />
     <Project Path="src/Impeller.Core.Engine/Impeller.Core.Engine.csproj" />
