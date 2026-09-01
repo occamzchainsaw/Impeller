@@ -50,6 +50,10 @@ public sealed class ControlLoop(
     private IReadOnlyDictionary<SensorId, ControlBinding> _bindings =
         new Dictionary<SensorId, ControlBinding>();
 
+    // One per bound control, rebuilt with the bindings so a reconfigured control never inherits a
+    // half-finished start attempt from the configuration it replaced.
+    private Dictionary<SensorId, StartStopGate> _startStop = [];
+
     private bool _failsafeEngaged;
 
     /// <summary>Whether the engine is currently holding every control at its failsafe duty.</summary>
@@ -90,6 +94,7 @@ public sealed class ControlLoop(
 
         _orderedCurves = order.Ordered;
         _bindings = bound;
+        _startStop = bound.ToDictionary(entry => entry.Key, entry => new StartStopGate(entry.Value));
     }
 
     /// <summary>
@@ -244,7 +249,16 @@ public sealed class ControlLoop(
 
             var limited = binding.ApplyLimits(target);
 
-            var next = binding.ApplySlewLimit(current, limited, elapsed);
+            // Start and stop handling wraps the ramp limiter rather than following it: a fan being
+            // kicked into motion needs its start duty immediately, and easing up to it is exactly
+            // what fails to start it.
+            var pairedRpm = binding.PairedFanSensorId.IsNone
+                ? null
+                : _registry.GetValue(binding.PairedFanSensorId);
+
+            var next = _startStop.TryGetValue(binding.ControlId, out var gate)
+                ? gate.Resolve(limited, current, pairedRpm, elapsed)
+                : binding.ApplySlewLimit(current, limited, elapsed);
 
             // Skip writes that would change nothing. Some Super I/O chips are slow to write,
             // and at one tick a second the redundant traffic adds up.

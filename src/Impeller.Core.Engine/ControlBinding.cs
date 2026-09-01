@@ -59,6 +59,58 @@ public sealed class ControlBinding(SensorId controlId)
     }
 
     /// <summary>
+    /// The duty this fan needs to break away from rest. Leave it off to disable start and stop
+    /// handling entirely.
+    /// </summary>
+    /// <remarks>
+    /// Higher than the duty needed to keep turning, which is why it is a separate value from
+    /// <see cref="MinimumDuty"/>: static friction costs more than the running kind.
+    /// </remarks>
+    public Duty StartDuty { get; set; } = Duty.Off;
+
+    /// <summary>
+    /// The duty below which this fan stalls rather than running slowly. Leave it off to derive one
+    /// just under <see cref="StartDuty"/>.
+    /// </summary>
+    public Duty StopDuty { get; set; } = Duty.Off;
+
+    /// <summary>
+    /// The tach sensor for this fan, if one has been paired with it.
+    /// </summary>
+    /// <remarks>
+    /// The only direct evidence available that a start attempt actually worked. Without it the
+    /// engine has to trust a timer, which is workable but blind.
+    /// </remarks>
+    public SensorId PairedFanSensorId { get; set; } = SensorId.None;
+
+    /// <summary>How long to hold <see cref="StartDuty"/> before assuming the fan is turning.</summary>
+    public TimeSpan StartKickDuration { get; set; } = TimeSpan.FromSeconds(6);
+
+    /// <summary>
+    /// The duty at or below which this control is commanded off instead.
+    /// </summary>
+    /// <remarks>
+    /// Zero — the feature disabled — whenever no <see cref="StartDuty"/> is set. Where a start duty
+    /// is set but no distinct stop duty is, the threshold sits one point under the start duty:
+    /// somebody who has told us where the fan starts has told us most of what we need, and asking
+    /// for a second number to make the first one useful is a poor trade.
+    /// </remarks>
+    public float StopThreshold
+    {
+        get
+        {
+            if (StartDuty.IsOff)
+            {
+                return 0f;
+            }
+
+            return StopDuty.IsOff || StopDuty == StartDuty
+                ? StartDuty.Percent - 1f
+                : StopDuty.Percent;
+        }
+    }
+
+    /// <summary>
     /// Applies this binding's floor and ceiling to a duty.
     /// </summary>
     public Duty ApplyLimits(Duty duty)
