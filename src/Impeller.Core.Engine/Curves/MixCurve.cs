@@ -2,25 +2,6 @@ using Impeller.Core.Abstractions;
 
 namespace Impeller.Core.Engine.Curves;
 
-/// <summary>How a <see cref="MixCurve"/> combines its inputs.</summary>
-public enum MixFunction
-{
-    /// <summary>The highest input. The usual choice: one fan answering to whichever component is hottest.</summary>
-    Maximum = 0,
-
-    /// <summary>The lowest input.</summary>
-    Minimum,
-
-    /// <summary>The arithmetic mean of the inputs.</summary>
-    Average,
-
-    /// <summary>The sum of the inputs, saturating at full.</summary>
-    Sum,
-
-    /// <summary>The first input minus all the rest, saturating at zero.</summary>
-    Difference,
-}
-
 /// <summary>
 /// Combines several other curves into one output.
 /// </summary>
