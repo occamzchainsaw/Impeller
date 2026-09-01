@@ -1,4 +1,5 @@
 using Impeller.App.ViewModels;
+using Impeller.App.ViewModels.Engine;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 
@@ -40,6 +41,10 @@ public partial class App : Application
     {
         var services = new ServiceCollection();
 
+        // One connection for the whole app: the main window and the tray icon are two views of the
+        // same engine, not two clients competing for it.
+        services.AddSingleton<EngineConnection>();
+
         // Transient: a page navigated away from is discarded along with its view model, so
         // returning to it starts from a clean state rather than one the user last left behind.
         services.AddTransient<DashboardViewModel>();
@@ -54,6 +59,10 @@ public partial class App : Application
     /// <inheritdoc />
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        // Started before the window so the first page to open finds a connection already in
+        // progress rather than one that begins when it happens to be looked at.
+        GetService<EngineConnection>().Start();
+
         _window = new MainWindow();
         _window.Activate();
     }

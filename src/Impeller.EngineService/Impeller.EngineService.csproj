@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Worker">
+﻿<Project Sdk="Microsoft.NET.Sdk.Worker">
 
   <PropertyGroup>
     <!-- Hosts the hardware layer, so it inherits the Windows-only target. -->
@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.11" />
+    <PackageReference Include="StreamJsonRpc" Version="2.25.29" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.11" />
   </ItemGroup>
 

@@ -6,7 +6,7 @@ using Impeller.Core.Engine.Sensors;
 
 namespace Impeller.Core.Engine.Tests.Sensors;
 
-public class CustomSensorProviderTests
+public class CustomSensorProviderTests : IAsyncDisposable
 {
     private static readonly TimeSpan Tick = TimeSpan.FromSeconds(1);
 
@@ -22,7 +22,13 @@ public class CustomSensorProviderTests
         _provider = new CustomSensorProvider(TimeProvider.System) { Registry = _registry };
     }
 
-    private CustomSensorDefinition MixOf(string name, params SensorId[] sources) => new()
+    public async ValueTask DisposeAsync()
+    {
+        await _provider.DisposeAsync();
+        GC.SuppressFinalize(this);
+    }
+
+    private static CustomSensorDefinition MixOf(string name, params SensorId[] sources) => new()
     {
         Id = SensorId.New(),
         Name = name,

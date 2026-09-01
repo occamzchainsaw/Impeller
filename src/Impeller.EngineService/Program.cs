@@ -4,6 +4,7 @@ using Impeller.Core.Engine.Configuration;
 using Impeller.Core.Engine.Sensors;
 using Impeller.Core.Persistence;
 using Impeller.EngineService;
+using Impeller.EngineService.Ipc;
 using Impeller.Hardware.Lhm;
 using Microsoft.Extensions.Options;
 
@@ -76,14 +77,19 @@ builder.Services.AddSingleton(sp =>
 
 builder.Services.AddSingleton<ISensorProvider>(sp => sp.GetRequiredService<CustomSensorProvider>());
 
+// The seam between the engine and anything watching it, plus the two counters the RPC layer reads
+// to answer "is this thing alive" without a reference to a hosted service.
+builder.Services.AddSingleton<EngineNotifications>();
+builder.Services.AddSingleton<EngineWorkerState>();
+builder.Services.AddSingleton<EngineRpcService>();
+
 builder.Services.AddHostedService<EngineWorker>();
+
+// Registered after the worker so the first client to connect finds a configured engine rather
+// than one still enumerating hardware.
+builder.Services.AddHostedService<EngineRpcHost>();
 
 var host = builder.Build();
 await host.RunAsync();
 
 return 0;
-
-/// <summary>Where this installation keeps its state, and whether that is the portable location.</summary>
-/// <param name="ConfigurationRoot">The folder holding configurations and the identity map.</param>
-/// <param name="Portable">Whether it sits beside the executable rather than in shared app data.</param>
-internal sealed record EngineStatePaths(string ConfigurationRoot, bool Portable);

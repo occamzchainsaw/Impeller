@@ -6,23 +6,69 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:local="using:Impeller.App.Shell.Pages"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="using:Impeller.App.ViewModels"
     mc:Ignorable="d">
 
     <Grid Padding="24,16,24,16" RowSpacing="16">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
         <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="{x:Bind ViewModel.Title}" />
 
+        <!--  Informational while connected, a warning when not: fans going unmanaged is not a neutral state.  -->
         <InfoBar
             Grid.Row="1"
-            VerticalAlignment="Top"
             IsClosable="False"
             IsOpen="True"
             Message="{x:Bind ViewModel.EngineStatus, Mode=OneWay}"
-            Severity="Informational"
+            Severity="{x:Bind local:DashboardPage.SeverityFor(ViewModel.IsConnected), Mode=OneWay}"
             Title="Engine" />
+
+        <ScrollViewer Grid.Row="2">
+            <StackPanel Spacing="12">
+                <TextBlock
+                    Style="{StaticResource BodyStrongTextBlockStyle}"
+                    Text="{x:Bind local:DashboardPage.SensorSummary(ViewModel.SensorCount), Mode=OneWay}" />
+
+                <ItemsControl ItemsSource="{x:Bind ViewModel.Controls}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ControlTileViewModel">
+                            <Border
+                                Margin="0,0,0,8"
+                                Padding="16,12,16,12"
+                                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8">
+                                <Grid ColumnSpacing="16">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <TextBlock VerticalAlignment="Center" Text="{x:Bind Name}" />
+
+                                    <TextBlock
+                                        Grid.Column="1"
+                                        VerticalAlignment="Center"
+                                        Style="{StaticResource BodyStrongTextBlockStyle}"
+                                        Text="{x:Bind Duty, Mode=OneWay}" />
+
+                                    <TextBlock
+                                        Grid.Column="2"
+                                        VerticalAlignment="Center"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Text="{x:Bind Owner, Mode=OneWay}" />
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </ScrollViewer>
     </Grid>
 </Page>

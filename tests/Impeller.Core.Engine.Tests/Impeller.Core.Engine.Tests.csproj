@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Impeller.Core.Engine\Impeller.Core.Engine.csproj" />
     <ProjectReference Include="..\..\src\Impeller.Core.Persistence\Impeller.Core.Persistence.csproj" />
+    <ProjectReference Include="..\..\src\Impeller.Ipc.Contracts\Impeller.Ipc.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

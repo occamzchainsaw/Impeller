@@ -2,6 +2,8 @@ using Impeller.Core.Abstractions;
 using Impeller.Core.Engine;
 using Impeller.Core.Engine.Configuration;
 using Impeller.Core.Persistence;
+using Impeller.EngineService.Ipc;
+using Impeller.Ipc.Contracts;
 using Microsoft.Extensions.Options;
 
 namespace Impeller.EngineService;
@@ -26,7 +28,10 @@ public sealed partial class EngineWorker(
     ControlLoop loop,
     AggregatingSensorRegistry registry,
     IEnumerable<ISensorProvider> providers,
+    ControlOwnershipRegistry ownership,
     ConfigurationCoordinator configuration,
+    EngineNotifications notifications,
+    EngineWorkerState state,
     TimeProvider timeProvider,
     IOptions<EngineOptions> options,
     ILogger<EngineWorker> logger) : BackgroundService
@@ -44,6 +49,11 @@ public sealed partial class EngineWorker(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Relayed rather than raised directly by the engine: the tick loop and the coordinator
+        // should not know that an RPC channel exists at all.
+        configuration.Changed += OnConfigurationChanged;
+        registry.ProviderTopologyChanged += OnHardwareChanged;
+
         await RegisterProvidersAsync(stoppingToken).ConfigureAwait(false);
 
         // Providers first, then the configuration: a first run builds its control list from the
@@ -75,7 +85,45 @@ public sealed partial class EngineWorker(
             // Normal shutdown.
         }
 
+        configuration.Changed -= OnConfigurationChanged;
+        registry.ProviderTopologyChanged -= OnHardwareChanged;
+
         Log.Stopping(logger, TickCount);
+    }
+
+    private void OnConfigurationChanged(object? sender, ConfigurationChanged e) =>
+        notifications.RaiseConfigurationChanged(
+            new ConfigurationResult(true, e.Name, e.Validation));
+
+    private void OnHardwareChanged(object? sender, ISensorProvider provider) =>
+        notifications.RaiseHardwareChanged();
+
+    /// <summary>
+    /// Hands this tick's readings to anything watching.
+    /// </summary>
+    /// <remarks>
+    /// Skipped entirely when nothing is attached. Building several hundred readings a second for
+    /// an audience of nobody is the sort of cost that is invisible until it is measured.
+    /// </remarks>
+    private void PublishTick(TickResult result, DateTimeOffset now)
+    {
+        if (!notifications.HasTickListeners)
+        {
+            return;
+        }
+
+        var sensors = registry.Sensors
+            .Select(sensor => new SensorReading(sensor.Id, sensor.Value))
+            .ToArray();
+
+        var controls = registry.Controls
+            .Select(control => new ControlReading(
+                control.Id,
+                result.CommandedDuties.TryGetValue(control.Id, out var duty) ? duty : control.CommandedDuty,
+                ownership.GetOwner(control.Id).Kind))
+            .ToArray();
+
+        notifications.RaiseTick(new TickSnapshot(TickCount, now, sensors, controls));
     }
 
     /// <summary>
@@ -249,6 +297,12 @@ public sealed partial class EngineWorker(
 
             TickCount++;
             LastTickCompleted = now;
+
+            // Shared so the RPC layer can read liveness without a reference to a hosted service.
+            state.TickCount = TickCount;
+            state.LastTickCompleted = now;
+
+            PublishTick(result, now);
         }
         catch (OperationCanceledException)
         {
