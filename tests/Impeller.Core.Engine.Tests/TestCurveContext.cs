@@ -10,6 +10,7 @@ internal sealed class TestCurveContext : ICurveEvaluationContext
 {
     private readonly Dictionary<SensorId, float?> _sensors = [];
     private readonly Dictionary<CurveId, Duty?> _curves = [];
+    private readonly Dictionary<SensorId, Duty?> _controls = [];
 
     /// <summary>Time attributed to the next evaluation. Defaults to the engine's nominal tick.</summary>
     public TimeSpan Elapsed { get; set; } = TimeSpan.FromSeconds(1);
@@ -23,6 +24,9 @@ internal sealed class TestCurveContext : ICurveEvaluationContext
     /// <inheritdoc />
     public Duty? GetCurveOutput(CurveId id) => _curves.GetValueOrDefault(id);
 
+    /// <inheritdoc />
+    public Duty? GetControlDuty(SensorId controlId) => _controls.GetValueOrDefault(controlId);
+
     /// <summary>Sets a sensor reading. A null value models a sensor that has stopped reporting.</summary>
     public TestCurveContext WithSensor(SensorId id, float? value)
     {
@@ -35,6 +39,13 @@ internal sealed class TestCurveContext : ICurveEvaluationContext
     public TestCurveContext WithCurve(CurveId id, Duty? value)
     {
         _curves[id] = value;
+        return this;
+    }
+
+    /// <summary>Sets the duty a control is currently being held at.</summary>
+    public TestCurveContext WithControl(SensorId controlId, Duty? value)
+    {
+        _controls[controlId] = value;
         return this;
     }
 

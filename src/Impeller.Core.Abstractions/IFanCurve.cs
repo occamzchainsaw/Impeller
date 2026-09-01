@@ -1,9 +1,12 @@
+using System.Text.Json.Serialization;
+
 namespace Impeller.Core.Abstractions;
 
 /// <summary>
 /// Identity for a curve, distinct from <see cref="SensorId"/> so a curve and a sensor
 /// can never be confused for one another in a saved configuration.
 /// </summary>
+[JsonConverter(typeof(CurveIdJsonConverter))]
 public readonly record struct CurveId(Guid Value)
 {
     /// <summary>A id that refers to no curve.</summary>
@@ -62,6 +65,26 @@ public interface ICurveEvaluationContext
     /// not discovered here.
     /// </remarks>
     Duty? GetCurveOutput(CurveId id);
+
+    /// <summary>
+    /// The duty a control is actually being held at, or <see langword="null"/> if the engine has
+    /// not written it yet.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the value <em>after</em> the control's own floor, ceiling and ramp limit, which is
+    /// the whole reason it is exposed separately from <see cref="GetCurveOutput"/>: a curve that
+    /// mirrors a fan wants the speed that fan is really running at, not the speed its curve asked
+    /// for before the binding clamped it.
+    /// </para>
+    /// <para>
+    /// It necessarily lags by one tick, since every curve is evaluated before any control is
+    /// written. That is the correct behaviour rather than a limitation — a mirror reads what the
+    /// thing it mirrors is doing, and reading a value being computed in the same pass is what
+    /// makes feedback loops possible in the first place.
+    /// </para>
+    /// </remarks>
+    Duty? GetControlDuty(SensorId controlId);
 }
 
 /// <summary>
@@ -87,6 +110,17 @@ public interface IFanCurve
     /// cycles at load time.
     /// </summary>
     IReadOnlyCollection<CurveId> CurveDependencies { get; }
+
+    /// <summary>
+    /// Every control whose commanded duty this curve reads.
+    /// </summary>
+    /// <remarks>
+    /// Distinct from <see cref="SensorDependencies"/>, which is about reading a measurement.
+    /// This is about reading an <em>output</em>, and it creates a dependency edge that runs
+    /// through whichever curve drives that control — so a sync curve pointed, however
+    /// indirectly, at the fan it itself drives is a cycle, and is rejected at load time.
+    /// </remarks>
+    IReadOnlyCollection<SensorId> ControlDependencies { get; }
 
     /// <summary>
     /// Computes this tick's output.

@@ -75,7 +75,12 @@ public sealed class ControlLoop(
         ArgumentNullException.ThrowIfNull(curves);
         ArgumentNullException.ThrowIfNull(bindings);
 
-        var order = CurveGraph.Sort(curves);
+        // Bindings first: the sort needs to know which curve drives which control before it can
+        // follow a sync curve's control edge back to the curve behind it.
+        var bound = bindings.ToDictionary(binding => binding.ControlId);
+        var controlCurves = bound.ToDictionary(entry => entry.Key, entry => entry.Value.CurveId);
+
+        var order = CurveGraph.Sort(curves, controlCurves);
         if (!order.IsValid)
         {
             var cycle = string.Join(" -> ", order.Cycle);
@@ -84,7 +89,7 @@ public sealed class ControlLoop(
         }
 
         _orderedCurves = order.Ordered;
-        _bindings = bindings.ToDictionary(binding => binding.ControlId);
+        _bindings = bound;
     }
 
     /// <summary>
@@ -238,6 +243,7 @@ public sealed class ControlLoop(
                 : control.CommandedDuty ?? target;
 
             var limited = binding.ApplyLimits(target);
+
             var next = binding.ApplySlewLimit(current, limited, elapsed);
 
             // Skip writes that would change nothing. Some Super I/O chips are slow to write,
@@ -274,7 +280,12 @@ public sealed class ControlLoop(
     private Dictionary<CurveId, Duty?> EvaluateCurves(TimeSpan elapsed)
     {
         var outputs = new Dictionary<CurveId, Duty?>(_orderedCurves.Count);
-        var context = new EvaluationContext(_registry, outputs, elapsed, _time.GetUtcNow());
+        var context = new EvaluationContext(
+            _registry,
+            outputs,
+            _commandedDuties,
+            elapsed,
+            _time.GetUtcNow());
 
         foreach (var curve in _orderedCurves)
         {
@@ -325,6 +336,7 @@ public sealed class ControlLoop(
     private sealed class EvaluationContext(
         ISensorRegistry registry,
         Dictionary<CurveId, Duty?> outputs,
+        Dictionary<SensorId, Duty> commandedDuties,
         TimeSpan elapsed,
         DateTimeOffset timestamp) : ICurveEvaluationContext
     {
@@ -335,5 +347,18 @@ public sealed class ControlLoop(
         public float? GetSensorValue(SensorId id) => registry.GetValue(id);
 
         public Duty? GetCurveOutput(CurveId id) => outputs.GetValueOrDefault(id);
+
+        public Duty? GetControlDuty(SensorId controlId)
+        {
+            if (commandedDuties.TryGetValue(controlId, out var commanded))
+            {
+                return commanded;
+            }
+
+            // Nothing written yet this run. Fall back to whatever the hardware says it is already
+            // doing, so a sync curve has something to mirror on the very first tick instead of
+            // leaving its fan parked until the control it follows happens to move.
+            return registry.GetControl(controlId)?.CommandedDuty;
+        }
     }
 }

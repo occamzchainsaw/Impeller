@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Impeller.Core.Abstractions;
 
 /// <summary>
@@ -9,6 +11,7 @@ namespace Impeller.Core.Abstractions;
 /// mix subtracting below 0), and the sane response is saturation, not an exception
 /// on the tick loop.
 /// </remarks>
+[JsonConverter(typeof(DutyJsonConverter))]
 public readonly record struct Duty : IComparable<Duty>, IFormattable
 {
     /// <summary>Lowest representable duty.</summary>

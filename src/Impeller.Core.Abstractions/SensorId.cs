@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Impeller.Core.Abstractions;
 
 /// <summary>
@@ -15,6 +17,7 @@ namespace Impeller.Core.Abstractions;
 /// hardware gets a new one.
 /// </para>
 /// </remarks>
+[JsonConverter(typeof(SensorIdJsonConverter))]
 public readonly record struct SensorId
 {
     /// <summary>An id that refers to nothing. Used for "no sensor selected".</summary>

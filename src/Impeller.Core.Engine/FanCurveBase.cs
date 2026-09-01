@@ -21,6 +21,9 @@ public abstract class FanCurveBase(CurveId id, string name) : IFanCurve
     public virtual IReadOnlyCollection<CurveId> CurveDependencies => [];
 
     /// <inheritdoc />
+    public virtual IReadOnlyCollection<SensorId> ControlDependencies => [];
+
+    /// <inheritdoc />
     public abstract Duty? Evaluate(ICurveEvaluationContext context);
 
     /// <inheritdoc />
