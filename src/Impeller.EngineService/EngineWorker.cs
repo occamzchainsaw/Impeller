@@ -23,6 +23,7 @@ namespace Impeller.EngineService;
 public sealed partial class EngineWorker(
     ControlLoop loop,
     AggregatingSensorRegistry registry,
+    IEnumerable<ISensorProvider> providers,
     TimeProvider timeProvider,
     IOptions<EngineOptions> options,
     ILogger<EngineWorker> logger) : BackgroundService
@@ -40,6 +41,8 @@ public sealed partial class EngineWorker(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        await RegisterProvidersAsync(stoppingToken).ConfigureAwait(false);
+
         Log.Starting(logger, _options.TickInterval, registry.ProviderCount);
 
         using var timer = new PeriodicTimer(_options.TickInterval, timeProvider);
@@ -64,6 +67,40 @@ public sealed partial class EngineWorker(
         }
 
         Log.Stopping(logger, TickCount);
+    }
+
+    /// <summary>
+    /// Brings every registered provider up before the first tick.
+    /// </summary>
+    /// <remarks>
+    /// A provider that fails to initialise is kept rather than dropped, so the settings UI can
+    /// show it as unavailable and offer a retry. Starting the loop with no working provider is
+    /// still the right thing to do: manual overrides and plugin-owned controls do not depend on
+    /// hardware discovery, and a machine with a broken sensor backend should not be a machine
+    /// with no engine.
+    /// </remarks>
+    private async Task RegisterProvidersAsync(CancellationToken cancellationToken)
+    {
+        foreach (var provider in providers)
+        {
+            var result = await registry.AddAsync(provider, cancellationToken).ConfigureAwait(false);
+
+            if (!result.Succeeded)
+            {
+                Log.ProviderFailed(logger, provider.DisplayName, result.Error!);
+                continue;
+            }
+
+            Log.ProviderReady(logger, provider.DisplayName, result.SensorCount, result.ControlCount);
+
+            if (result.FailedGroups.Count > 0)
+            {
+                Log.ProviderGroupsMissing(
+                    logger,
+                    provider.DisplayName,
+                    string.Join(", ", result.FailedGroups));
+            }
+        }
     }
 
     /// <summary>
@@ -175,5 +212,28 @@ public sealed partial class EngineWorker(
             Level = LogLevel.Error,
             Message = "Failed to apply the failsafe during shutdown.")]
         public static partial void FailsafeFailed(ILogger logger, Exception exception);
+
+        [LoggerMessage(
+            EventId = 8,
+            Level = LogLevel.Information,
+            Message = "{Provider}: {SensorCount} sensor(s), {ControlCount} control(s).")]
+        public static partial void ProviderReady(
+            ILogger logger,
+            string provider,
+            int sensorCount,
+            int controlCount);
+
+        [LoggerMessage(
+            EventId = 9,
+            Level = LogLevel.Error,
+            Message = "{Provider} failed to initialise and will be unavailable.")]
+        public static partial void ProviderFailed(ILogger logger, string provider, Exception exception);
+
+        [LoggerMessage(
+            EventId = 10,
+            Level = LogLevel.Warning,
+            Message = "{Provider} found no hardware for: {Groups}. This usually means the process "
+                + "lacks the privileges its kernel driver needs, or a vendor driver is missing.")]
+        public static partial void ProviderGroupsMissing(ILogger logger, string provider, string groups);
     }
 }

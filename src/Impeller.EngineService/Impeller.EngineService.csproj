@@ -6,6 +6,9 @@
     <OutputType>Exe</OutputType>
     <UserSecretsId>dotnet-Impeller.EngineService-9a6b97a2-96e2-4110-b70a-8d0dab3da35a</UserSecretsId>
     <Description>Elevated headless engine: owns the tick loop, hardware access, and the plugin host.</Description>
+    <!-- Required by [LibraryImport]: the generated P/Invoke marshalling for the Service Control
+         Manager uses pointers. No hand-written unsafe code exists in this project. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
