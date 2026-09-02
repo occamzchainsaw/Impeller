@@ -1,0 +1,620 @@
+{
+  "__VERSION__": "275",
+  "FanControl": {
+    "Controls": [
+      {
+        "NickName": "CPU Fan",
+        "Identifier": "/lpc/nct6687d/control/0",
+        "IsHidden": false,
+        "Enable": true,
+        "SelectedFanCurve": {
+          "Name": "Auto CPU"
+        },
+        "SelectedOffset": 0,
+        "PairedFanSensor": {
+          "Identifier": "/lpc/nct6687d/fan/0"
+        },
+        "SelectedStart": 22,
+        "SelectedStop": 16,
+        "MinimumPercent": 0,
+        "SelectedCommandStepUp": 8,
+        "SelectedCommandStepDown": 8,
+        "ManualControlValue": 50,
+        "ManualControl": false,
+        "ForceApply": false,
+        "Calibration": [
+          [
+            10,
+            0,
+            false
+          ],
+          [
+            20,
+            486,
+            false
+          ],
+          [
+            30,
+            724,
+            false
+          ],
+          [
+            40,
+            978,
+            false
+          ],
+          [
+            50,
+            1208,
+            false
+          ],
+          [
+            60,
+            1396,
+            false
+          ],
+          [
+            70,
+            1587,
+            false
+          ],
+          [
+            80,
+            1804,
+            false
+          ],
+          [
+            90,
+            1996,
+            false
+          ],
+          [
+            100,
+            2193,
+            false
+          ]
+        ]
+      },
+      {
+        "NickName": "Pump Fan",
+        "Identifier": "/lpc/nct6687d/control/1",
+        "IsHidden": true,
+        "Enable": false,
+        "SelectedFanCurve": null,
+        "SelectedOffset": 0,
+        "PairedFanSensor": null,
+        "SelectedStart": 0,
+        "SelectedStop": 0,
+        "MinimumPercent": 0,
+        "SelectedCommandStepUp": 8,
+        "SelectedCommandStepDown": 8,
+        "ManualControlValue": 50,
+        "ManualControl": false,
+        "ForceApply": false,
+        "Calibration": []
+      },
+      {
+        "NickName": "Top Exhaust",
+        "Identifier": "/lpc/nct6687d/control/2",
+        "IsHidden": false,
+        "Enable": true,
+        "SelectedFanCurve": {
+          "Name": "Flat 50"
+        },
+        "SelectedOffset": 0,
+        "PairedFanSensor": {
+          "Identifier": "/lpc/nct6687d/fan/2"
+        },
+        "SelectedStart": 25,
+        "SelectedStop": 16,
+        "MinimumPercent": 0,
+        "SelectedCommandStepUp": 8,
+        "SelectedCommandStepDown": 8,
+        "ManualControlValue": 50,
+        "ManualControl": false,
+        "ForceApply": false,
+        "Calibration": [
+          [
+            10,
+            0,
+            false
+          ],
+          [
+            20,
+            318,
+            false
+          ],
+          [
+            30,
+            476,
+            false
+          ],
+          [
+            40,
+            617,
+            false
+          ],
+          [
+            50,
+            736,
+            false
+          ],
+          [
+            60,
+            848,
+            false
+          ],
+          [
+            70,
+            951,
+            false
+          ],
+          [
+            80,
+            1036,
+            false
+          ],
+          [
+            90,
+            1122,
+            false
+          ],
+          [
+            100,
+            1173,
+            false
+          ]
+        ]
+      },
+      {
+        "NickName": "Front Fans",
+        "Identifier": "/lpc/nct6687d/control/3",
+        "IsHidden": false,
+        "Enable": true,
+        "SelectedFanCurve": {
+          "Name": "Auto GPU CPU Mix"
+        },
+        "SelectedOffset": 0,
+        "PairedFanSensor": {
+          "Identifier": "/lpc/nct6687d/fan/3"
+        },
+        "SelectedStart": 45,
+        "SelectedStop": 36,
+        "MinimumPercent": 0,
+        "SelectedCommandStepUp": 8,
+        "SelectedCommandStepDown": 8,
+        "ManualControlValue": 100,
+        "ManualControl": false,
+        "ForceApply": false,
+        "Calibration": [
+          [
+            30,
+            0,
+            false
+          ],
+          [
+            40,
+            358,
+            false
+          ],
+          [
+            50,
+            463,
+            false
+          ],
+          [
+            60,
+            566,
+            false
+          ],
+          [
+            70,
+            656,
+            false
+          ],
+          [
+            80,
+            753,
+            false
+          ],
+          [
+            90,
+            899,
+            false
+          ],
+          [
+            100,
+            954,
+            false
+          ]
+        ]
+      },
+      {
+        "NickName": "Rig Cooling",
+        "Identifier": "/lpc/nct6687d/control/4",
+        "IsHidden": false,
+        "Enable": true,
+        "SelectedFanCurve": null,
+        "SelectedOffset": 0,
+        "PairedFanSensor": {
+          "Identifier": "/lpc/nct6687d/fan/4"
+        },
+        "SelectedStart": 13,
+        "SelectedStop": 7,
+        "MinimumPercent": 0,
+        "SelectedCommandStepUp": 8,
+        "SelectedCommandStepDown": 8,
+        "ManualControlValue": 0,
+        "ManualControl": true,
+        "ForceApply": false,
+        "Calibration": [
+          [
+            1,
+            0,
+            false
+          ],
+          [
+            10,
+            609,
+            false
+          ],
+          [
+            20,
+            888,
+            false
+          ],
+          [
+            30,
+            1153,
+            false
+          ],
+          [
+            40,
+            1420,
+            false
+          ],
+          [
+            50,
+            1670,
+            false
+          ],
+          [
+            60,
+            1970,
+            false
+          ],
+          [
+            70,
+            2224,
+            false
+          ],
+          [
+            80,
+            2510,
+            false
+          ],
+          [
+            90,
+            2738,
+            false
+          ],
+          [
+            100,
+            3015,
+            false
+          ]
+        ]
+      },
+      {
+        "NickName": "Rear Exhaust",
+        "Identifier": "/lpc/nct6687d/control/5",
+        "IsHidden": false,
+        "Enable": true,
+        "SelectedFanCurve": {
+          "Name": "Auto CPU"
+        },
+        "SelectedOffset": 0,
+        "PairedFanSensor": {
+          "Identifier": "/lpc/nct6687d/fan/5"
+        },
+        "SelectedStart": 37,
+        "SelectedStop": 16,
+        "MinimumPercent": 0,
+        "SelectedCommandStepUp": 8,
+        "SelectedCommandStepDown": 8,
+        "ManualControlValue": 50,
+        "ManualControl": false,
+        "ForceApply": false,
+        "Calibration": [
+          [
+            10,
+            0,
+            false
+          ],
+          [
+            20,
+            333,
+            false
+          ],
+          [
+            30,
+            508,
+            false
+          ],
+          [
+            40,
+            660,
+            false
+          ],
+          [
+            50,
+            792,
+            false
+          ],
+          [
+            60,
+            904,
+            false
+          ],
+          [
+            70,
+            1012,
+            false
+          ],
+          [
+            80,
+            1111,
+            false
+          ],
+          [
+            90,
+            1207,
+            false
+          ],
+          [
+            100,
+            1267,
+            false
+          ]
+        ]
+      },
+      {
+        "NickName": "System Fan #5",
+        "Identifier": "/lpc/nct6687d/control/6",
+        "IsHidden": true,
+        "Enable": false,
+        "SelectedFanCurve": null,
+        "SelectedOffset": 0,
+        "PairedFanSensor": null,
+        "SelectedStart": 0,
+        "SelectedStop": 0,
+        "MinimumPercent": 0,
+        "SelectedCommandStepUp": 8,
+        "SelectedCommandStepDown": 8,
+        "ManualControlValue": 50,
+        "ManualControl": false,
+        "ForceApply": false,
+        "Calibration": []
+      },
+      {
+        "NickName": "System Fan #6",
+        "Identifier": "/lpc/nct6687d/control/7",
+        "IsHidden": true,
+        "Enable": false,
+        "SelectedFanCurve": null,
+        "SelectedOffset": 0,
+        "PairedFanSensor": null,
+        "SelectedStart": 0,
+        "SelectedStop": 0,
+        "MinimumPercent": 0,
+        "SelectedCommandStepUp": 8,
+        "SelectedCommandStepDown": 8,
+        "ManualControlValue": 50,
+        "ManualControl": false,
+        "ForceApply": false,
+        "Calibration": []
+      },
+      {
+        "NickName": "Control 1 - AMD Radeon RX 7800 XT",
+        "Identifier": "ADLX/AMD Radeon RX 7800 XT/768/control",
+        "IsHidden": false,
+        "Enable": true,
+        "SelectedFanCurve": {
+          "Name": "Auto GPU"
+        },
+        "SelectedOffset": 0,
+        "PairedFanSensor": {
+          "Identifier": "ADLX/AMD Radeon RX 7800 XT/768/fan"
+        },
+        "SelectedStart": 9,
+        "SelectedStop": 6,
+        "MinimumPercent": 0,
+        "SelectedCommandStepUp": 8,
+        "SelectedCommandStepDown": 8,
+        "ManualControlValue": 100,
+        "ManualControl": false,
+        "ForceApply": false,
+        "Calibration": [
+          [
+            0,
+            0,
+            false
+          ],
+          [
+            1,
+            624,
+            false
+          ],
+          [
+            10,
+            629,
+            false
+          ],
+          [
+            20,
+            944,
+            false
+          ],
+          [
+            30,
+            1418,
+            false
+          ],
+          [
+            40,
+            1850,
+            false
+          ],
+          [
+            50,
+            2214,
+            false
+          ],
+          [
+            60,
+            2550,
+            false
+          ],
+          [
+            70,
+            2808,
+            false
+          ],
+          [
+            80,
+            3044,
+            false
+          ],
+          [
+            90,
+            3378,
+            false
+          ],
+          [
+            100,
+            3671,
+            false
+          ]
+        ]
+      }
+    ],
+    "CustomSensors": [
+      {
+        "NickName": "CPU GPU Mix",
+        "Identifier": "Mix/CPU GPU Mix",
+        "IsHidden": false,
+        "AllowMissingSensor": false,
+        "SelectedMixFunction": 0,
+        "SelectedSensors": [
+          {
+            "Identifier": "/amdcpu/0/temperature/2"
+          },
+          {
+            "Identifier": "ADLX/AMD Radeon RX 7800 XT/768/temp/GPU"
+          }
+        ]
+      }
+    ],
+    "FanCurves": [
+      {
+        "Name": "Flat 50",
+        "IsHidden": false,
+        "CommandMode": 0,
+        "Percent": 75
+      },
+      {
+        "Name": "Auto CPU",
+        "IsHidden": false,
+        "CommandMode": 0,
+        "SelectedTempSource": {
+          "Identifier": "/amdcpu/0/temperature/2"
+        },
+        "Step": 2,
+        "Deadband": 3,
+        "SelectedResponseTime": 2,
+        "IdleTemperature": 35,
+        "MinFanSpeed": 30,
+        "MaxFanSpeed": 100,
+        "LoadTemperature": 75
+      },
+      {
+        "Name": "Auto GPU",
+        "IsHidden": false,
+        "CommandMode": 0,
+        "SelectedTempSource": {
+          "Identifier": "ADLX/AMD Radeon RX 7800 XT/768/temp/GPU"
+        },
+        "Step": 2,
+        "Deadband": 3,
+        "SelectedResponseTime": 2,
+        "IdleTemperature": 38,
+        "MinFanSpeed": 0,
+        "MaxFanSpeed": 80,
+        "LoadTemperature": 80
+      },
+      {
+        "Name": "Auto GPU CPU Mix",
+        "IsHidden": false,
+        "CommandMode": 0,
+        "SelectedTempSource": {
+          "Identifier": "Mix/CPU GPU Mix"
+        },
+        "Step": 2,
+        "Deadband": 3,
+        "SelectedResponseTime": 2,
+        "IdleTemperature": 40,
+        "MinFanSpeed": 50,
+        "MaxFanSpeed": 100,
+        "LoadTemperature": 75
+      }
+    ],
+    "FanSensors": [
+      {
+        "Identifier": "/lpc/nct6687d/fan/0",
+        "IsHidden": false,
+        "NickName": "CPU Fan"
+      },
+      {
+        "Identifier": "/lpc/nct6687d/fan/1",
+        "IsHidden": false,
+        "NickName": "Pump Fan"
+      },
+      {
+        "Identifier": "/lpc/nct6687d/fan/2",
+        "IsHidden": false,
+        "NickName": "Top Exhaust"
+      },
+      {
+        "Identifier": "/lpc/nct6687d/fan/3",
+        "IsHidden": false,
+        "NickName": "Front Fans"
+      },
+      {
+        "Identifier": "/lpc/nct6687d/fan/4",
+        "IsHidden": false,
+        "NickName": "Rig Cooling"
+      },
+      {
+        "Identifier": "/lpc/nct6687d/fan/5",
+        "IsHidden": false,
+        "NickName": "Rear Exhaust"
+      },
+      {
+        "Identifier": "/lpc/nct6687d/fan/6",
+        "IsHidden": false,
+        "NickName": "System Fan #5"
+      },
+      {
+        "Identifier": "/lpc/nct6687d/fan/7",
+        "IsHidden": false,
+        "NickName": "System Fan #6"
+      },
+      {
+        "Identifier": "ADLX/AMD Radeon RX 7800 XT/768/fan",
+        "IsHidden": false,
+        "NickName": "Control 1 - AMD Radeon RX 7800 XT"
+      }
+    ],
+    "TemperatureSensors": []
+  }
+}
