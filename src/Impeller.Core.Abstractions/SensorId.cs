@@ -82,5 +82,6 @@ public readonly record struct HardwareFingerprint(
     /// as identity and never parsed back.
     /// </summary>
     public override string ToString() =>
-        $"{ProviderId}/{HardwareKey}/{Kind.ToString().ToLowerInvariant()}/{Channel}";
+        $"{ProviderId}{(HardwareKey.StartsWith('/') ? string.Empty : "/")}{HardwareKey}"
+        + $"/{Kind.ToString().ToLowerInvariant()}/{Channel}";
 }

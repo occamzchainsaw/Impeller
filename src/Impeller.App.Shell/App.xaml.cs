@@ -2,6 +2,7 @@ using Impeller.App.ViewModels;
 using Impeller.App.ViewModels.Engine;
 using Impeller.Platform.Windows;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.UI.Xaml;
 
 namespace Impeller.App.Shell;
@@ -25,6 +26,18 @@ public partial class App : Application
 {
     private Window? _window;
 
+    private static partial class Log
+    {
+        [LoggerMessage(
+            EventId = 50,
+            Level = LogLevel.Information,
+            Message = "Impeller shell starting. Logs in {LogRoot}.")]
+        public static partial void Starting(ILogger logger, string logRoot);
+
+        [LoggerMessage(EventId = 51, Level = LogLevel.Critical, Message = "Unhandled exception in the shell.")]
+        public static partial void Crashed(ILogger logger, Exception exception);
+    }
+
     /// <summary>The application's service provider.</summary>
     public static IServiceProvider Services { get; private set; } = null!;
 
@@ -42,10 +55,15 @@ public partial class App : Application
     {
         var services = new ServiceCollection();
 
+        // Registered first, so anything constructed below can take a logger.
+        services.AddShellLogging();
+
         // One connection for the whole app: the main window and the tray icon are two views of the
         // same engine, not two clients competing for it.
-        services.AddSingleton(_ => new EngineConnection
+        services.AddSingleton(sp => new EngineConnection
         {
+            Logger = sp.GetRequiredService<ILogger<EngineConnection>>(),
+
             // Lets the shell tell "the engine is not installed" apart from "it is installed and
             // not running". Only the first of those needs the user to do something, and a first
             // run that reports the wrong one sends people looking for a service that was never
@@ -67,11 +85,22 @@ public partial class App : Application
     /// <inheritdoc />
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        var logger = GetService<ILoggerFactory>().CreateLogger<App>();
+        Log.Starting(logger, ShellLogging.LogRoot);
+
+        // Anything that escapes a handler would otherwise take the window down with nothing said.
+        UnhandledException += (_, e) =>
+        {
+            Log.Crashed(logger, e.Exception);
+            ShellLogging.Close();
+        };
+
         // Started before the window so the first page to open finds a connection already in
         // progress rather than one that begins when it happens to be looked at.
         GetService<EngineConnection>().Start();
 
         _window = new MainWindow();
+        _window.Closed += (_, _) => ShellLogging.Close();
         _window.Activate();
     }
 }

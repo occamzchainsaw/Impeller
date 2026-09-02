@@ -204,6 +204,15 @@ public interface IEngineControl
         Duty duty,
         TimeSpan duration,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Collects everything worth knowing about this engine into one attachable document.
+    /// </summary>
+    /// <remarks>
+    /// Built on request rather than kept up to date. It is what someone attaches to a bug report,
+    /// and the thing that decides whether a problem can be diagnosed by whoever reads it.
+    /// </remarks>
+    Task<DiagnosticReport> GetDiagnosticReportAsync(CancellationToken cancellationToken = default);
 }
 
 /// <summary>

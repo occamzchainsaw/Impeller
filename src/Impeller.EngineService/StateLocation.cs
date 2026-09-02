@@ -16,6 +16,9 @@ public static class StateLocation
     /// <summary>The folder name used in both locations.</summary>
     public const string FolderName = "Configurations";
 
+    /// <summary>The folder logs are written to, alongside the configurations.</summary>
+    public const string LogFolderName = "Logs";
+
     /// <summary>
     /// Works out the configuration folder, creating it if necessary.
     /// </summary>
@@ -49,6 +52,38 @@ public static class StateLocation
 
         Directory.CreateDirectory(shared);
         return shared;
+    }
+
+    /// <summary>
+    /// The folder logs go in, beside wherever the configurations ended up.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not a fixed shared-app-data path. A portable install is meant to be a directory
+    /// you can copy, move and delete; scattering its logs into <c>%ProgramData%</c> would leave
+    /// them behind after the folder was gone and would write outside the install on a machine where
+    /// that was the whole point. Wherever the state went, the logs go beside it.
+    /// </remarks>
+    public static string ResolveLogs(string configurationRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(configurationRoot);
+
+        var parent = Path.GetDirectoryName(configurationRoot.TrimEnd(
+            Path.DirectorySeparatorChar,
+            Path.AltDirectorySeparatorChar));
+
+        var logs = Path.Combine(parent ?? configurationRoot, LogFolderName);
+
+        try
+        {
+            Directory.CreateDirectory(logs);
+            return logs;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Never worth failing to start over. An engine with no log file still controls fans;
+            // the Event Log still records that it came up.
+            return configurationRoot;
+        }
     }
 
     /// <summary>

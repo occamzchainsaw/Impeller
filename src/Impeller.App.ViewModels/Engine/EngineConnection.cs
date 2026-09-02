@@ -2,6 +2,8 @@ using System.IO.Pipes;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Impeller.Core.Abstractions.Configuration;
 using Impeller.Ipc.Contracts;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using StreamJsonRpc;
 
 namespace Impeller.App.ViewModels.Engine;
@@ -73,6 +75,16 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
     /// reused by a different front end.
     /// </remarks>
     public Func<bool>? IsEngineInstalled { get; set; }
+
+    /// <summary>
+    /// Where connection attempts are recorded.
+    /// </summary>
+    /// <remarks>
+    /// The shell's log exists mostly for this. "It says the engine is not running" is the report
+    /// that arrives most often and the one the engine's own log cannot answer, because from its
+    /// side nothing happened at all.
+    /// </remarks>
+    public ILogger Logger { get; set; } = NullLogger.Instance;
 
     /// <summary>Raised when a fresh snapshot has been fetched, after every successful connect.</summary>
     public event EventHandler<EngineSnapshot>? SnapshotReceived;
@@ -152,6 +164,7 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
                 // Whatever went wrong, the loop keeps trying. A shell that silently stops
                 // reconnecting looks identical to an engine that is down, and the user would have
                 // no way to tell which they were looking at.
+                Log.AttemptFailed(Logger, ex);
                 SetState(EngineConnectionState.Disconnected, $"Could not reach the engine: {ex.Message}");
                 wasConnected = false;
             }
@@ -216,6 +229,7 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException or RemoteRpcException)
         {
+            Log.ConnectionLost(Logger, ex);
             SetState(EngineConnectionState.Disconnected, "Lost the connection to the engine service.");
             return true;
         }
@@ -248,6 +262,13 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
             var snapshot = await engine.GetSnapshotAsync(cancellationToken).ConfigureAwait(false);
             Snapshot = snapshot;
 
+            Log.Connected(
+                Logger,
+                snapshot.Status.Version,
+                snapshot.Sensors.Count,
+                snapshot.Controls.Count,
+                snapshot.ConfigurationName);
+
             SetState(
                 EngineConnectionState.Connected,
                 $"Connected. {snapshot.Sensors.Count} sensors, {snapshot.Controls.Count} controls, "
@@ -276,11 +297,14 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
     {
         if (!IsInstalled())
         {
+            Log.NotInstalled(Logger);
             SetState(
                 EngineConnectionState.NotInstalled,
                 "The Impeller engine service is not installed. Fans are not being controlled.");
             return;
         }
+
+        Log.NotRunning(Logger);
 
         SetState(
             EngineConnectionState.Disconnected,
@@ -318,5 +342,39 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
     {
         State = state;
         StatusMessage = message;
+    }
+
+    private static partial class Log
+    {
+        [LoggerMessage(
+            EventId = 40,
+            Level = LogLevel.Information,
+            Message = "Connected to engine {Version}: {SensorCount} sensor(s), {ControlCount} control(s), configuration '{Configuration}'.")]
+        public static partial void Connected(
+            ILogger logger,
+            string version,
+            int sensorCount,
+            int controlCount,
+            string configuration);
+
+        [LoggerMessage(EventId = 41, Level = LogLevel.Warning, Message = "Lost the connection to the engine.")]
+        public static partial void ConnectionLost(ILogger logger, Exception exception);
+
+        [LoggerMessage(EventId = 42, Level = LogLevel.Error, Message = "The connection attempt failed. Retrying.")]
+        public static partial void AttemptFailed(ILogger logger, Exception exception);
+
+        [LoggerMessage(
+            EventId = 43,
+            Level = LogLevel.Warning,
+            Message = "The engine service is not installed on this machine.")]
+        public static partial void NotInstalled(ILogger logger);
+
+        // Debug, not warning: the reconnect loop reaches this on every attempt while the engine is
+        // down, and a restart taking a few seconds should not read as a wall of failures.
+        [LoggerMessage(
+            EventId = 44,
+            Level = LogLevel.Debug,
+            Message = "The engine service is installed but did not answer.")]
+        public static partial void NotRunning(ILogger logger);
     }
 }

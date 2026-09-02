@@ -6,7 +6,10 @@ using Impeller.Core.Persistence;
 using Impeller.EngineService;
 using Impeller.EngineService.Ipc;
 using Impeller.Hardware.Lhm;
+using Microsoft.Extensions.Logging.EventLog;
 using Microsoft.Extensions.Options;
+using Serilog;
+using Serilog.Events;
 
 // Management verbs short-circuit before any hosting is built: installing a service should not
 // open hardware, and opening hardware needs privileges that "status" has no business requiring.
@@ -32,7 +35,42 @@ var engineOptions = builder.Configuration
 
 var configurationRoot = StateLocation.Resolve(engineOptions.ConfigurationPath, out var portable);
 
-builder.Services.AddSingleton(new EngineStatePaths(configurationRoot, portable));
+var statePaths = new EngineStatePaths(configurationRoot, portable);
+builder.Services.AddSingleton(statePaths);
+
+// A file log, because the Event Log is the wrong place to read a tick loop from: it is awkward to
+// scroll, awkward to attach to a bug report, and it drops anything below Information by default —
+// which is exactly the detail that explains why a fan did something unexpected.
+builder.Services.AddSerilog((_, configuration) => configuration
+    .MinimumLevel.Is(LogEventLevel.Debug)
+
+    // The transport is chatty at debug and none of it is ours.
+    .MinimumLevel.Override("StreamJsonRpc", LogEventLevel.Warning)
+    .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
+    .Enrich.FromLogContext()
+    .WriteTo.File(
+        Path.Combine(statePaths.LogRoot, "engine-.log"),
+        rollingInterval: RollingInterval.Day,
+
+        // Capped in both directions. A machine left running for a year should not accumulate a
+        // year of logs, and a provider failing every tick should not fill the disk in an
+        // afternoon -- an engine that runs out of disk stops controlling fans.
+        retainedFileCountLimit: 14,
+        fileSizeLimitBytes: 32L * 1024 * 1024,
+        rollOnFileSizeLimit: true,
+
+        // Flushed on an interval rather than per line. A crash can cost the last second of log,
+        // which is a fair trade against a synchronous disk write on every tick.
+        buffered: true,
+        flushToDiskInterval: TimeSpan.FromSeconds(2),
+        outputTemplate:
+            "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}"));
+
+// The Event Log stays, narrowed to what someone opens Event Viewer to find: whether the service
+// started, whether it stopped, and anything that went wrong badly enough to matter. Everything
+// else now has a better home, and leaving it here as well would bury those three.
+builder.Logging.AddFilter<EventLogLoggerProvider>(null, LogLevel.Warning);
+builder.Logging.AddFilter<EventLogLoggerProvider>(EngineLifecycle.Category, LogLevel.Information);
 
 // Injected rather than read from DateTimeOffset.UtcNow, so ticks, ramp limiting and every
 // curve's response timing can be driven deterministically in tests.
@@ -90,6 +128,28 @@ builder.Services.AddHostedService<EngineWorker>();
 builder.Services.AddHostedService<EngineRpcHost>();
 
 var host = builder.Build();
-await host.RunAsync();
+
+var lifecycle = host.Services
+    .GetRequiredService<ILoggerFactory>()
+    .CreateLogger(EngineLifecycle.Category);
+
+EngineLifecycle.Starting(lifecycle, statePaths.ConfigurationRoot, statePaths.LogRoot);
+
+try
+{
+    await host.RunAsync();
+}
+catch (Exception ex)
+{
+    // The one thing worth putting in the Event Log at error level: the service did not merely
+    // stop, it fell over, and whoever is looking has no log file to find yet because the failure
+    // may well be why there is none.
+    EngineLifecycle.Faulted(lifecycle, ex);
+    throw;
+}
+finally
+{
+    EngineLifecycle.Stopped(lifecycle);
+}
 
 return 0;

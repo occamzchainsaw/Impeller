@@ -1,8 +1,11 @@
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
 using Impeller.Core.Abstractions;
 using Impeller.Core.Abstractions.Configuration;
 using Impeller.Core.Engine;
 using Impeller.Core.Engine.Configuration;
+using Impeller.Core.Persistence.Diagnostics;
 using Impeller.Ipc.Contracts;
 
 namespace Impeller.EngineService.Ipc;
@@ -190,6 +193,66 @@ public sealed class EngineRpcService(
         }
 
         ownership.Release(controlId, ManualClaimant);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Assembled here rather than by the shell because most of it is only reachable from inside the
+    /// engine process — the provider results, the configuration actually in force, the log file the
+    /// engine holds open. A shell rendering its own version would be reporting on what it was told,
+    /// not on what is running.
+    /// </remarks>
+    public Task<DiagnosticReport> GetDiagnosticReportAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(new DiagnosticReport
+        {
+            Taken = timeProvider.GetUtcNow(),
+            Status = BuildStatus(),
+            OperatingSystem = RuntimeInformation.OSDescription,
+            Runtime = RuntimeInformation.FrameworkDescription,
+            Architecture = RuntimeInformation.ProcessArchitecture.ToString(),
+            RunningAsService = !Environment.UserInteractive,
+            Identity = CurrentIdentity(),
+            LogRoot = paths.LogRoot,
+            Providers = [.. registry.Providers.Select(DescribeProvider)],
+            Sensors = [.. registry.Sensors.Select(Describe)],
+            Controls = [.. registry.Controls.Select(DescribeControl)],
+            ConfigurationName = coordinator.CurrentName,
+            Configuration = coordinator.Current,
+            Validation = coordinator.LastValidation,
+            RecentLog = [.. LogFiles.Tail(paths.LogRoot, "engine-*.log")],
+        });
+
+    private static ProviderDiagnostics DescribeProvider(
+        (ISensorProvider Provider, ProviderInitializationResult? Result) entry) => new(
+        entry.Provider.ProviderId,
+        entry.Provider.DisplayName,
+        entry.Result?.Succeeded ?? false,
+        entry.Result?.SensorCount ?? 0,
+        entry.Result?.ControlCount ?? 0,
+        [.. entry.Result?.FailedGroups ?? []],
+
+        // The whole exception, not just its message: the inner one is usually the interesting half
+        // when a driver refuses to load.
+        entry.Result?.Error?.ToString());
+
+    /// <summary>
+    /// Who the engine is running as, which is the first question when hardware is missing.
+    /// </summary>
+    /// <remarks>
+    /// A backend that enumerates nothing under a user account and everything under LocalSystem is a
+    /// permissions problem wearing a hardware problem's clothes, and this is the line in the report
+    /// that tells them apart.
+    /// </remarks>
+    private static string CurrentIdentity()
+    {
+        try
+        {
+            return WindowsIdentity.GetCurrent().Name;
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or InvalidOperationException)
+        {
+            return "unknown";
+        }
     }
 
     private EngineStatus BuildStatus() => new(

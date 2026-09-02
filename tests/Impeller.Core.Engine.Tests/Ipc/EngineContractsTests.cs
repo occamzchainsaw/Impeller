@@ -191,6 +191,26 @@ public sealed class EngineContractsTests : IAsyncDisposable
 
         public IEngineEvents? Events { get; set; }
 
+        /// <summary>A report with one of everything, so the round-trip has something to lose.</summary>
+        public DiagnosticReport Report { get; } = new()
+        {
+            Taken = DateTimeOffset.UnixEpoch,
+            Status = new EngineStatus("0.1.0", 99, DateTimeOffset.UnixEpoch, true, @"C:\ProgramData\Impeller"),
+            OperatingSystem = "Windows 11",
+            Runtime = ".NET 10.0",
+            Architecture = "X64",
+            RunningAsService = true,
+            Identity = @"NT AUTHORITY\SYSTEM",
+            LogRoot = @"C:\ProgramData\Impeller\Logs",
+            Providers =
+            [
+                new ProviderDiagnostics("lhm", "LibreHardwareMonitor", true, 193, 9, ["GPU"], null),
+                new ProviderDiagnostics("adlx", "AMD", false, 0, 0, [], "not installed"),
+            ],
+            ConfigurationName = "Default",
+            RecentLog = ["line one", "line two"],
+        };
+
         public ImpellerConfiguration? LastApplied { get; private set; }
 
         public Duty? LastDuty { get; private set; }
@@ -315,6 +335,11 @@ public sealed class EngineContractsTests : IAsyncDisposable
 
         public Task<bool> ReleaseControlAsync(SensorId controlId, CancellationToken cancellationToken = default) =>
             Task.FromResult(true);
+
+        public Task<DiagnosticReport> GetDiagnosticReportAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Report);
+        }
 
         public Task<ControlAcquireOutcome> IdentifyControlAsync(
             SensorId controlId,
