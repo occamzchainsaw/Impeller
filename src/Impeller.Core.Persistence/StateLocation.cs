@@ -1,4 +1,4 @@
-namespace Impeller.EngineService;
+namespace Impeller.Core.Persistence;
 
 /// <summary>
 /// Decides where this installation keeps its configurations and its identity map.
@@ -18,6 +18,9 @@ public static class StateLocation
 
     /// <summary>The folder logs are written to, alongside the configurations.</summary>
     public const string LogFolderName = "Logs";
+
+    /// <summary>The file mapping this machine's hardware onto the ids configurations reference.</summary>
+    public const string IdentityMapName = "sensor-identity.json";
 
     /// <summary>
     /// Works out the configuration folder, creating it if necessary.
@@ -83,6 +86,55 @@ public static class StateLocation
             // Never worth failing to start over. An engine with no log file still controls fans;
             // the Event Log still records that it came up.
             return configurationRoot;
+        }
+    }
+
+    /// <summary>
+    /// Where the sensor identity map lives: beside the configuration folder, never inside it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It used to sit inside, and that was a bug with a visible symptom: the configuration store
+    /// lists every JSON file in its folder, so the map appeared in the list of saved configurations
+    /// and in the shell's dropdown, where choosing it fails to load. Excluding it by name would have
+    /// hidden the symptom and left a machine-state file living among the user's documents.
+    /// </para>
+    /// <para>
+    /// It does not belong there on its own terms either. A configuration is portable between
+    /// machines; the identity map is the one file that is emphatically not, because it records which
+    /// synthetic id <em>this</em> PC assigned to which physical sensor. Copying a configuration
+    /// folder to another machine should carry the curves and leave the identities behind.
+    /// </para>
+    /// </remarks>
+    public static string ResolveIdentityMap(string configurationRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(configurationRoot);
+
+        var parent = Path.GetDirectoryName(configurationRoot.TrimEnd(
+            Path.DirectorySeparatorChar,
+            Path.AltDirectorySeparatorChar));
+
+        var beside = Path.Combine(parent ?? configurationRoot, IdentityMapName);
+        var legacy = Path.Combine(configurationRoot, IdentityMapName);
+
+        if (File.Exists(beside) || !File.Exists(legacy))
+        {
+            return beside;
+        }
+
+        try
+        {
+            // Moved rather than left in place, and moved once. This file is the identity of every
+            // sensor on the machine: losing it silently repoints every curve in every configuration
+            // at whatever gets enumerated first next time.
+            File.Move(legacy, beside);
+            return beside;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Keep reading the one that exists. A tidier path is not worth a machine that forgets
+            // which fan is which.
+            return legacy;
         }
     }
 

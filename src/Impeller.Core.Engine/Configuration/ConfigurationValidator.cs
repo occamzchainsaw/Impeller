@@ -263,9 +263,16 @@ public static class ConfigurationValidator
         {
             if (binding.Enabled && binding.CurveId.IsNone)
             {
-                issues.Add(Warning(
-                    "binding-without-curve",
-                    $"Control {binding.ControlId} is enabled but has no curve assigned."));
+                // A pin is a complete instruction on its own, so a control held by hand with no
+                // curve behind it is a finished state rather than a half-made one. Warning about it
+                // fires on every imported configuration that had a fan set to manual, and a warning
+                // that shows up on correct configurations is one people learn to scroll past.
+                if (binding.ManualDuty is null)
+                {
+                    issues.Add(Warning(
+                        "binding-without-curve",
+                        $"Control {binding.ControlId} is enabled but has no curve assigned."));
+                }
             }
             else if (binding.Enabled && !curveIds.Contains(binding.CurveId))
             {

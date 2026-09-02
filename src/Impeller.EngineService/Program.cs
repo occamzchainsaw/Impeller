@@ -96,7 +96,7 @@ builder.Services.AddSingleton<ConfigurationCoordinator>();
 // sensor. Deliberately not part of a configuration, so copying a config between machines carries
 // the curves without carrying one machine's hardware identity.
 builder.Services.AddSingleton<ISensorIdentityMap>(
-    _ => new JsonSensorIdentityMap(Path.Combine(configurationRoot, "sensor-identity.json")));
+    _ => new JsonSensorIdentityMap(statePaths.IdentityMapPath));
 
 builder.Services.Configure<LhmOptions>(builder.Configuration.GetSection(LhmOptions.SectionName));
 builder.Services.AddSingleton<ISensorProvider, LhmSensorProvider>();
