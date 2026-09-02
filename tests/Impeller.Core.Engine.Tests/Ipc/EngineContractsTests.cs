@@ -180,6 +180,63 @@ public sealed class EngineContractsTests : IAsyncDisposable
         Assert.NotNull(await Engine.GetSnapshotAsync(CancellationToken.None));
     }
 
+
+    [Fact]
+    public async Task An_import_summary_keeps_every_note_and_its_outcome()
+    {
+        // The notes are the reason the import is worth doing rather than guessing, and an outcome
+        // that arrives as the wrong enum value turns "this could not be resolved" into "imported".
+        var summary = await Engine.ImportConfigurationAsync(@"C:\FanControl\userConfig.json", null, CancellationToken.None);
+
+        Assert.Equal(_engine.Import, summary);
+        Assert.Equal(3, summary.Notes.Count);
+        Assert.Equal(ImportOutcome.Unresolved, summary.Notes[1].Outcome);
+        Assert.Equal("Rig Cooling", summary.Notes[1].Subject);
+    }
+
+    [Fact]
+    public async Task A_failed_import_carries_its_reason_rather_than_faulting_the_call()
+    {
+        // A file that is not a configuration is an ordinary thing for a user to pick, and an
+        // exception across the wire would reach them as a stack trace instead of a sentence.
+        var summary = await Engine.ImportConfigurationAsync(@"C:\nope.json", "Broken", CancellationToken.None);
+
+        Assert.Equal(_engine.Import.Succeeded, summary.Succeeded);
+    }
+
+    [Fact]
+    public async Task A_tuning_report_survives_the_wire_with_its_outcomes()
+    {
+        var report = await Engine.CalibrateAsync(
+            [FakeEngine.FanControl, FakeEngine.HeldControl],
+            CancellationToken.None);
+
+        Assert.Equal(_engine.Tuning, report);
+
+        // Cancelled and saved are independent: a run stopped after six of eight fans keeps those six.
+        Assert.True(report.Cancelled);
+        Assert.True(report.Saved);
+    }
+
+    [Fact]
+    public async Task The_controls_named_for_a_tuning_run_arrive_as_the_same_ids()
+    {
+        await Engine.PairFansAsync([FakeEngine.FanControl, FakeEngine.HeldControl], CancellationToken.None);
+
+        Assert.Equal(2, _engine.LastTuned.Count);
+        Assert.Equal(FakeEngine.FanControl, _engine.LastTuned[0]);
+        Assert.Equal(FakeEngine.HeldControl, _engine.LastTuned[1]);
+    }
+
+    [Fact]
+    public async Task Tuning_progress_is_pushed_to_the_shell()
+    {
+        var progress = new TuningProgress(TuningKind.Calibration, "SteppingDown", "Fan #4 at 40% — 780 RPM", 2, 8);
+
+        await _engine.Events!.OnTuningProgressAsync(progress);
+
+        Assert.Equal(progress, await _client.NextTuningProgress());
+    }
     /// <summary>A stand-in engine holding one of everything the contracts can carry.</summary>
     private sealed class FakeEngine : IEngineControl
     {
@@ -214,6 +271,34 @@ public sealed class EngineContractsTests : IAsyncDisposable
         public ImpellerConfiguration? LastApplied { get; private set; }
 
         public Duty? LastDuty { get; private set; }
+
+        /// <summary>An import report with one note of each outcome, so nothing survives by accident.</summary>
+        public ImportSummary Import { get; } = new(
+            true,
+            "userConfig (2)",
+            null,
+            [
+                new ImportNote(ImportOutcome.Adjusted, "Auto CPU", "Hysteresis was widened to match."),
+                new ImportNote(ImportOutcome.Unresolved, "Rig Cooling", "No control here matches."),
+                new ImportNote(ImportOutcome.Skipped, "Graph 1", "Its sensor could not be read."),
+            ],
+            4,
+            9,
+            1,
+            ConfigurationValidation.Clean);
+
+        /// <summary>A finished calibration, with one fan that worked and one that did not.</summary>
+        public TuningReport Tuning { get; } = new(
+            TuningKind.Calibration,
+            [
+                new TuningOutcome(FanControl, "Fan #4", true, "11 points measured."),
+                new TuningOutcome(HeldControl, "Fan #5", false, "No tacho is paired with this control."),
+            ],
+            Cancelled: true,
+            Saved: true);
+
+        /// <summary>Which controls the last tuning call named.</summary>
+        public EquatableArray<SensorId> LastTuned { get; private set; }
 
         public EngineSnapshot Snapshot { get; } = new(
             new EngineStatus("0.1.0", 1234, DateTimeOffset.UnixEpoch, false, @"C:\ProgramData\Impeller"),
@@ -347,6 +432,31 @@ public sealed class EngineContractsTests : IAsyncDisposable
             TimeSpan duration,
             CancellationToken cancellationToken = default) =>
             SetManualDutyAsync(controlId, duty, cancellationToken);
+
+        public Task<ImportSummary> ImportConfigurationAsync(
+            string path,
+            string? name = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Import);
+
+        public Task<TuningReport> CalibrateAsync(
+            EquatableArray<SensorId> controlIds,
+            CancellationToken cancellationToken = default)
+        {
+            LastTuned = controlIds;
+            return Task.FromResult(Tuning);
+        }
+
+        public Task<TuningReport> PairFansAsync(
+            EquatableArray<SensorId> controlIds,
+            CancellationToken cancellationToken = default)
+        {
+            LastTuned = controlIds;
+            return Task.FromResult(Tuning);
+        }
+
+        public Task<bool> CancelTuningAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(true);
     }
 
     /// <summary>A shell that records what the engine pushed at it.</summary>
@@ -366,5 +476,16 @@ public sealed class EngineContractsTests : IAsyncDisposable
         public Task OnConfigurationChangedAsync(ConfigurationResult result) => Task.CompletedTask;
 
         public Task OnHardwareChangedAsync() => Task.CompletedTask;
+
+        private readonly TaskCompletionSource<TuningProgress> _tuning =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<TuningProgress> NextTuningProgress() => _tuning.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        public Task OnTuningProgressAsync(TuningProgress progress)
+        {
+            _tuning.TrySetResult(progress);
+            return Task.CompletedTask;
+        }
     }
 }

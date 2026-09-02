@@ -5,7 +5,9 @@ using Impeller.Core.Abstractions;
 using Impeller.Core.Abstractions.Configuration;
 using Impeller.Core.Engine;
 using Impeller.Core.Engine.Configuration;
+using Impeller.Core.Engine.Tuning;
 using Impeller.Core.Persistence.Diagnostics;
+using Impeller.Core.Persistence.Legacy;
 using Impeller.Ipc.Contracts;
 
 namespace Impeller.EngineService.Ipc;
@@ -32,10 +34,15 @@ public sealed class EngineRpcService(
     ControlLoop loop,
     EngineStatePaths paths,
     TimeProvider timeProvider,
-    EngineWorkerState workerState) : IEngineControl
+    EngineWorkerState workerState,
+    TuningCoordinator tuning,
+    EngineNotifications notifications,
+    ISensorIdentityMap identityMap) : IEngineControl
 {
     /// <summary>Who the engine records as holding a manually overridden control.</summary>
     public const string ManualClaimant = ControlOwnershipRegistry.ManualClaimant;
+
+    private CancellationTokenSource? _tuningCancellation;
 
     /// <inheritdoc />
     public Task<EngineSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default) =>
@@ -193,6 +200,152 @@ public sealed class EngineRpcService(
         }
 
         ownership.Release(controlId, ManualClaimant);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Saved, never applied. Reading the notes is the point of importing rather than guessing, and
+    /// notes shown after the fans have already changed behaviour are notes shown too late.
+    /// </remarks>
+    public Task<ImportSummary> ImportConfigurationAsync(
+        string path,
+        string? name = null,
+        CancellationToken cancellationToken = default)
+    {
+        // The live registry is handed over as well as the identity map: motherboard references
+        // resolve through the map alone, but a graphics card is named rather than fingerprinted and
+        // can only be matched against what is actually here.
+        var importer = new FanControlConfigImporter(identityMap, registry);
+
+        ImportResult imported;
+
+        try
+        {
+            imported = importer.ImportFile(path, name);
+        }
+        catch (LegacyImportException ex)
+        {
+            return Task.FromResult(new ImportSummary(
+                false,
+                name ?? Path.GetFileNameWithoutExtension(path),
+                ex.Message,
+                [],
+                0,
+                0,
+                0,
+                ConfigurationValidation.Clean));
+        }
+
+        var configuration = imported.Configuration with { Name = Unused(imported.Configuration.Name) };
+        var validation = ConfigurationValidator.Validate(configuration, registry);
+
+        // Errors mean it could not be applied, not that it is not worth keeping. A configuration
+        // whose curves point at hardware this machine does not have is exactly what someone
+        // importing from another machine expects to fix by hand, and deleting it would leave them
+        // nothing to fix.
+        coordinator.Save(configuration);
+
+        return Task.FromResult(new ImportSummary(
+            true,
+            configuration.Name,
+            null,
+            imported.Notes,
+            configuration.Curves.Count,
+            configuration.Controls.Count,
+            configuration.CustomSensors.Count,
+            validation));
+    }
+
+    /// <inheritdoc />
+    public Task<TuningReport> CalibrateAsync(
+        EquatableArray<SensorId> controlIds,
+        CancellationToken cancellationToken = default) =>
+        RunTuningAsync(token => tuning.CalibrateAsync(controlIds, token), cancellationToken);
+
+    /// <inheritdoc />
+    public Task<TuningReport> PairFansAsync(
+        EquatableArray<SensorId> controlIds,
+        CancellationToken cancellationToken = default) =>
+        RunTuningAsync(token => tuning.PairAsync(controlIds, token), cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> CancelTuningAsync(CancellationToken cancellationToken = default)
+    {
+        var cancellation = Volatile.Read(ref _tuningCancellation);
+
+        if (cancellation is null)
+        {
+            return Task.FromResult(false);
+        }
+
+        cancellation.Cancel();
+        return Task.FromResult(true);
+    }
+
+    /// <summary>
+    /// Runs one tuning procedure, forwarding its progress to every attached shell.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Progress is broadcast rather than returned to the caller, because a run takes over every fan
+    /// in the machine: a second window open on the same engine has to be able to say what is
+    /// happening rather than looking like it stopped responding.
+    /// </para>
+    /// <para>
+    /// The token source is kept so <see cref="CancelTuningAsync"/> can reach it. That matters for
+    /// the case the caller's own token cannot cover — a shell that crashed mid-run leaves every fan
+    /// held at a baseline duty, and the next shell to connect needs a way to end it.
+    /// </para>
+    /// </remarks>
+    private async Task<TuningReport> RunTuningAsync(
+        Func<CancellationToken, Task<TuningReport>> run,
+        CancellationToken cancellationToken)
+    {
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        Interlocked.Exchange(ref _tuningCancellation, cancellation)?.Dispose();
+
+        void OnProgress(object? sender, TuningProgress progress) =>
+            notifications.RaiseTuningProgress(progress);
+
+        tuning.Progressed += OnProgress;
+
+        try
+        {
+            return await run(cancellation.Token).ConfigureAwait(false);
+        }
+        finally
+        {
+            tuning.Progressed -= OnProgress;
+            Interlocked.CompareExchange(ref _tuningCancellation, null, cancellation);
+        }
+    }
+
+    /// <summary>
+    /// A configuration name nothing is saved under yet.
+    /// </summary>
+    /// <remarks>
+    /// Importing the same file twice is an ordinary thing to do — usually after fixing something on
+    /// the source machine — and silently overwriting the first attempt would take away the thing
+    /// being compared against.
+    /// </remarks>
+    private string Unused(string name)
+    {
+        if (!coordinator.Exists(name))
+        {
+            return name;
+        }
+
+        for (var suffix = 2; suffix < 100; suffix++)
+        {
+            var candidate = $"{name} ({suffix})";
+
+            if (!coordinator.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return $"{name} ({Guid.NewGuid():N})";
     }
 
     /// <inheritdoc />

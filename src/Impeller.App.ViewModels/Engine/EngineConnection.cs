@@ -1,5 +1,6 @@
 using System.IO.Pipes;
 using CommunityToolkit.Mvvm.ComponentModel;
+using Impeller.Core.Abstractions;
 using Impeller.Core.Abstractions.Configuration;
 using Impeller.Ipc.Contracts;
 using Microsoft.Extensions.Logging;
@@ -98,6 +99,9 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
     /// <summary>Raised when the available hardware changes and the snapshot is stale.</summary>
     public event EventHandler? HardwareChanged;
 
+    /// <summary>Raised on each sample of a tuning run, wherever it was started from.</summary>
+    public event EventHandler<TuningProgress>? TuningProgressed;
+
     /// <summary>Starts connecting, and keeps reconnecting until disposed.</summary>
     public void Start() => _loop ??= Task.Run(() => RunAsync(_shutdown.Token));
 
@@ -119,6 +123,13 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
     public Task OnHardwareChangedAsync()
     {
         HardwareChanged?.Invoke(this, EventArgs.Empty);
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public Task OnTuningProgressAsync(TuningProgress progress)
+    {
+        TuningProgressed?.Invoke(this, progress);
         return Task.CompletedTask;
     }
 

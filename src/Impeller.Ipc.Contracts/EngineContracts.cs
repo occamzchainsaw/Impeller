@@ -133,6 +133,30 @@ public sealed record ControlAcquireOutcome(
     ControlOwnerKind? CurrentOwner,
     string? CurrentClaimantId);
 
+/// <summary>What an import of a legacy configuration did.</summary>
+/// <param name="Succeeded">Whether a configuration was produced and saved.</param>
+/// <param name="Name">What it was saved as.</param>
+/// <param name="Failure">Why nothing was produced. Null when it worked.</param>
+/// <param name="Notes">Everything the importer wants the user to know, in the order it was found.</param>
+/// <param name="Curves">How many curves came across.</param>
+/// <param name="Controls">How many controls.</param>
+/// <param name="CustomSensors">How many computed sensors.</param>
+/// <param name="Validation">What checking the result turned up.</param>
+/// <remarks>
+/// The notes are the point of this type rather than decoration on it. An import that silently drops
+/// a curve, or resolves a sensor to the wrong fan, is worse than one that refuses: the fans quietly
+/// do the wrong thing and the user has no reason to look.
+/// </remarks>
+public sealed record ImportSummary(
+    bool Succeeded,
+    string Name,
+    string? Failure,
+    EquatableArray<ImportNote> Notes,
+    int Curves,
+    int Controls,
+    int CustomSensors,
+    ConfigurationValidation Validation);
+
 /// <summary>
 /// What the shell can ask the engine to do.
 /// </summary>
@@ -206,6 +230,53 @@ public interface IEngineControl
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Reads a FanControl configuration file and saves what it says as a new configuration.
+    /// </summary>
+    /// <param name="path">The file to read. Opened for reading and never modified.</param>
+    /// <param name="name">What to save it as, or null to use the file's own name.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <remarks>
+    /// Saved but not applied. The engine keeps running whatever it was running, and the user loads
+    /// the import once they have read the notes — which is the whole reason the notes exist, and
+    /// would be pointless if the fans had already changed behaviour by the time they saw them.
+    /// </remarks>
+    Task<ImportSummary> ImportConfigurationAsync(
+        string path,
+        string? name = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Measures each of these controls: its duty-to-speed table, and the duties that start and
+    /// stall it.
+    /// </summary>
+    /// <remarks>
+    /// Minutes long, and it takes over the fans while it runs. Progress arrives on
+    /// <see cref="IEngineEvents.OnTuningProgressAsync"/>; cancelling the request stops the run and
+    /// keeps whatever had already been measured.
+    /// </remarks>
+    Task<TuningReport> CalibrateAsync(
+        EquatableArray<SensorId> controlIds,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Works out which fan-speed sensor belongs to which of these controls, by moving one fan at a
+    /// time and watching what changes.
+    /// </summary>
+    Task<TuningReport> PairFansAsync(
+        EquatableArray<SensorId> controlIds,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Stops whatever tuning run is going.
+    /// </summary>
+    /// <remarks>
+    /// Separate from cancelling the request that started it, because the shell that started it may
+    /// not be the one asking — a crashed window leaves a run holding every fan at its baseline, and
+    /// this is how the next window gets them back.
+    /// </remarks>
+    Task<bool> CancelTuningAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Collects everything worth knowing about this engine into one attachable document.
     /// </summary>
     /// <remarks>
@@ -232,4 +303,12 @@ public interface IEngineEvents
 
     /// <summary>The set of available hardware changed, so the snapshot is stale.</summary>
     Task OnHardwareChangedAsync();
+
+    /// <summary>A tuning run said what it is doing.</summary>
+    /// <remarks>
+    /// Broadcast rather than sent to the caller. A calibration takes over every fan in the machine
+    /// for several minutes, so a second window open on the same engine needs to be able to say what
+    /// is happening rather than appearing to have stopped responding.
+    /// </remarks>
+    Task OnTuningProgressAsync(TuningProgress progress);
 }

@@ -1,3 +1,4 @@
+using Impeller.Core.Abstractions;
 using Impeller.Ipc.Contracts;
 
 namespace Impeller.EngineService.Ipc;
@@ -21,6 +22,9 @@ public sealed class EngineNotifications
     /// <summary>Raised when the set of available hardware has changed.</summary>
     public event EventHandler? HardwareChanged;
 
+    /// <summary>Raised on each sample of a tuning run.</summary>
+    public event EventHandler<TuningProgress>? TuningProgressed;
+
     /// <summary>
     /// Whether anything is listening for ticks.
     /// </summary>
@@ -39,4 +43,8 @@ public sealed class EngineNotifications
 
     /// <summary>Announces that the available hardware has changed.</summary>
     public void RaiseHardwareChanged() => HardwareChanged?.Invoke(this, EventArgs.Empty);
+
+    /// <summary>Announces where a tuning run has got to.</summary>
+    public void RaiseTuningProgress(TuningProgress progress) =>
+        TuningProgressed?.Invoke(this, progress);
 }

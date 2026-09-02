@@ -2,28 +2,6 @@ using Impeller.Core.Abstractions.Configuration;
 
 namespace Impeller.Core.Persistence.Legacy;
 
-/// <summary>What became of one thing in the file being imported.</summary>
-public enum ImportOutcome
-{
-    /// <summary>Carried across unchanged.</summary>
-    Imported = 0,
-
-    /// <summary>Carried across, but not identically. The note says what differs.</summary>
-    Adjusted,
-
-    /// <summary>Kept, but pointing at something that could not be resolved on this machine.</summary>
-    Unresolved,
-
-    /// <summary>Not carried across at all. The note says why.</summary>
-    Skipped,
-}
-
-/// <summary>One line of the import report.</summary>
-/// <param name="Outcome">What happened.</param>
-/// <param name="Subject">What it happened to, named the way the user named it.</param>
-/// <param name="Message">What to tell them about it.</param>
-public readonly record struct ImportNote(ImportOutcome Outcome, string Subject, string Message);
-
 /// <summary>
 /// A configuration recovered from a legacy file, and an account of what that cost.
 /// </summary>

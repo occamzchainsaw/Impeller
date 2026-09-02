@@ -46,6 +46,7 @@ public sealed partial class EngineRpcHost(
         notifications.Ticked += OnTicked;
         notifications.ConfigurationChanged += OnConfigurationChanged;
         notifications.HardwareChanged += OnHardwareChanged;
+        notifications.TuningProgressed += OnTuningProgress;
 
         Log.Listening(logger, ImpellerPipe.Name);
 
@@ -74,6 +75,7 @@ public sealed partial class EngineRpcHost(
             notifications.Ticked -= OnTicked;
             notifications.ConfigurationChanged -= OnConfigurationChanged;
             notifications.HardwareChanged -= OnHardwareChanged;
+            notifications.TuningProgressed -= OnTuningProgress;
 
             DisconnectAll();
             Log.Stopped(logger);
@@ -147,6 +149,9 @@ public sealed partial class EngineRpcHost(
 
     private void OnHardwareChanged(object? sender, EventArgs e) =>
         Broadcast(events => events.OnHardwareChangedAsync());
+
+    private void OnTuningProgress(object? sender, Core.Abstractions.TuningProgress progress) =>
+        Broadcast(events => events.OnTuningProgressAsync(progress));
 
     /// <summary>
     /// Sends to every attached client, and lets none of them hold up the engine.
