@@ -87,6 +87,17 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
     /// </remarks>
     public ILogger Logger { get; set; } = NullLogger.Instance;
 
+    /// <summary>
+    /// Where every event and property change is raised.
+    /// </summary>
+    /// <remarks>
+    /// Ticks arrive on a transport thread, and everything downstream of them is bound to a UI that
+    /// only tolerates being touched from its own. Marshalling once, here, is what keeps every view
+    /// model free of the question -- and the alternative, each of them remembering to marshal, is
+    /// the kind of rule that holds until the one place it does not.
+    /// </remarks>
+    public IUiDispatcher Dispatcher { get; set; } = ImmediateDispatcher.Instance;
+
     /// <summary>Raised when a fresh snapshot has been fetched, after every successful connect.</summary>
     public event EventHandler<EngineSnapshot>? SnapshotReceived;
 
@@ -108,28 +119,64 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
     /// <inheritdoc />
     public Task OnTickAsync(TickSnapshot snapshot)
     {
-        Ticked?.Invoke(this, snapshot);
+        Dispatcher.Post(() => Ticked?.Invoke(this, snapshot));
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Anything that could change the configuration could have changed the controls, their
+    /// ownership, and the list of saved configurations along with it. So the whole snapshot is
+    /// re-read rather than patched from the little this event carries — one round trip, in one
+    /// place, instead of every page working out for itself what a configuration change implies.
+    /// </remarks>
     public Task OnConfigurationChangedAsync(ConfigurationResult result)
     {
-        ConfigurationChanged?.Invoke(this, result);
+        Dispatcher.Post(() => ConfigurationChanged?.Invoke(this, result));
+        _ = RefreshAsync();
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
     public Task OnHardwareChangedAsync()
     {
-        HardwareChanged?.Invoke(this, EventArgs.Empty);
+        Dispatcher.Post(() => HardwareChanged?.Invoke(this, EventArgs.Empty));
+        _ = RefreshAsync();
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Re-reads the snapshot and tells everyone watching.
+    /// </summary>
+    /// <remarks>
+    /// A failure here is swallowed on purpose. The thing that makes it fail is the connection
+    /// having gone, which the reconnect loop is already handling and will report properly; a
+    /// second, worse account of the same fact helps nobody.
+    /// </remarks>
+    public async Task RefreshAsync(CancellationToken cancellationToken = default)
+    {
+        if (Engine is not { } engine)
+        {
+            return;
+        }
+
+        try
+        {
+            var snapshot = await engine.GetSnapshotAsync(cancellationToken).ConfigureAwait(false);
+            Snapshot = snapshot;
+            Dispatcher.Post(() => SnapshotReceived?.Invoke(this, snapshot));
+        }
+        catch (Exception ex)
+            when (ex is IOException or ObjectDisposedException or RemoteRpcException or OperationCanceledException)
+        {
+            Log.RefreshFailed(Logger, ex);
+        }
     }
 
     /// <inheritdoc />
     public Task OnTuningProgressAsync(TuningProgress progress)
     {
-        TuningProgressed?.Invoke(this, progress);
+        Dispatcher.Post(() => TuningProgressed?.Invoke(this, progress));
         return Task.CompletedTask;
     }
 
@@ -285,7 +332,7 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
                 $"Connected. {snapshot.Sensors.Count} sensors, {snapshot.Controls.Count} controls, "
                 + $"configuration '{snapshot.ConfigurationName}'.");
 
-            SnapshotReceived?.Invoke(this, snapshot);
+            Dispatcher.Post(() => SnapshotReceived?.Invoke(this, snapshot));
 
             await rpc.Completion.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -349,11 +396,11 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
         }
     }
 
-    private void SetState(EngineConnectionState state, string message)
+    private void SetState(EngineConnectionState state, string message) => Dispatcher.Post(() =>
     {
         State = state;
         StatusMessage = message;
-    }
+    });
 
     private static partial class Log
     {
@@ -367,6 +414,12 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
             int sensorCount,
             int controlCount,
             string configuration);
+
+        [LoggerMessage(
+            EventId = 45,
+            Level = LogLevel.Debug,
+            Message = "Could not re-read the snapshot; the connection has probably gone.")]
+        public static partial void RefreshFailed(ILogger logger, Exception exception);
 
         [LoggerMessage(EventId = 41, Level = LogLevel.Warning, Message = "Lost the connection to the engine.")]
         public static partial void ConnectionLost(ILogger logger, Exception exception);

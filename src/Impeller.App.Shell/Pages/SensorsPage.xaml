@@ -6,20 +6,81 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:local="using:Impeller.App.Shell.Pages"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:sensors="using:Impeller.App.ViewModels.Sensors"
     mc:Ignorable="d">
 
-    <Grid Padding="24,16,24,16" RowSpacing="16">
+    <Grid Padding="24,16,24,16" RowSpacing="12">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="{x:Bind ViewModel.Title}" />
+        <Grid ColumnSpacing="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
 
-        <TextBlock
+            <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="{x:Bind ViewModel.Title}" />
+
+            <TextBlock
+                Grid.Column="1"
+                VerticalAlignment="Center"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Text="{x:Bind local:SensorsPage.Showing(ViewModel.Tree.VisibleCount), Mode=OneWay}" />
+        </Grid>
+
+        <!--  A search box rather than a scroll: 193 rows is not a list anyone reads through.  -->
+        <AutoSuggestBox
             Grid.Row="1"
-            VerticalAlignment="Top"
-            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-            Text="Not built yet." />
+            PlaceholderText="Search by name or hardware path"
+            QueryIcon="Find"
+            Text="{x:Bind ViewModel.Tree.Search, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+        <ScrollViewer Grid.Row="2">
+            <ItemsControl ItemsSource="{x:Bind ViewModel.Tree.Groups}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="sensors:SensorGroupViewModel">
+                        <Expander
+                            Margin="0,0,0,6"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Stretch"
+                            Header="{x:Bind Name}"
+                            IsExpanded="True">
+                            <ItemsControl ItemsSource="{x:Bind Sensors}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="sensors:SensorItemViewModel">
+                                        <Grid Padding="0,4,0,4" ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <TextBlock Text="{x:Bind Name}" ToolTipService.ToolTip="{x:Bind HardwarePath}" />
+
+                                            <TextBlock
+                                                Grid.Column="1"
+                                                MinWidth="90"
+                                                Style="{StaticResource BodyStrongTextBlockStyle}"
+                                                Text="{x:Bind ValueText, Mode=OneWay}"
+                                                TextAlignment="Right" />
+
+                                            <TextBlock
+                                                Grid.Column="2"
+                                                MinWidth="96"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Text="{x:Bind Kind}"
+                                                TextAlignment="Right" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Expander>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
     </Grid>
 </Page>

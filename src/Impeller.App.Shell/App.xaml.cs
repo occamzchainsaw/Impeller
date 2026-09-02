@@ -3,7 +3,9 @@ using Impeller.App.ViewModels.Engine;
 using Impeller.Platform.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
+using WinRT.Interop;
 
 namespace Impeller.App.Shell;
 
@@ -22,9 +24,10 @@ namespace Impeller.App.Shell;
 /// IPC and deliberately holds no engine types of its own.
 /// </para>
 /// </remarks>
-public partial class App : Application
+public partial class App : Application, IDisposable
 {
     private Window? _window;
+    private TrayIcon? _tray;
 
     private static partial class Log
     {
@@ -40,6 +43,15 @@ public partial class App : Application
 
     /// <summary>The application's service provider.</summary>
     public static IServiceProvider Services { get; private set; } = null!;
+
+    /// <summary>
+    /// The main window's handle.
+    /// </summary>
+    /// <remarks>
+    /// An unpackaged app has no identity for a file picker to hang off, so the handle has to be
+    /// supplied to one explicitly. Without it the dialog throws rather than appearing.
+    /// </remarks>
+    public static IntPtr MainWindowHandle { get; private set; }
 
     public App()
     {
@@ -95,12 +107,35 @@ public partial class App : Application
             ShellLogging.Close();
         };
 
+        // Ticks arrive on a transport thread and everything downstream of them is bound to XAML,
+        // which throws rather than merely disliking being touched from elsewhere. Handed over
+        // before the connection starts, so the very first tick is already marshalled.
+        var connection = GetService<EngineConnection>();
+        connection.Dispatcher = new ShellDispatcher(DispatcherQueue.GetForCurrentThread());
+
         // Started before the window so the first page to open finds a connection already in
         // progress rather than one that begins when it happens to be looked at.
-        GetService<EngineConnection>().Start();
+        connection.Start();
 
         _window = new MainWindow();
-        _window.Closed += (_, _) => ShellLogging.Close();
+        MainWindowHandle = WindowNative.GetWindowHandle(_window);
+
+        // The icon outlives the window: closing hides rather than exits, so there is still
+        // something on screen saying the fans are being managed.
+        _tray = new TrayIcon(_window, connection);
+
+        // Reached only on a real exit: the tray handles an ordinary close by hiding the window
+        // and cancelling it, so this runs once, when the user has actually chosen to quit.
+        _window.Closed += (_, _) => Dispose();
         _window.Activate();
+    }
+
+    /// <summary>Releases the tray icon and flushes the log on the way out.</summary>
+    public void Dispose()
+    {
+        _tray?.Dispose();
+        _tray = null;
+        ShellLogging.Close();
+        GC.SuppressFinalize(this);
     }
 }

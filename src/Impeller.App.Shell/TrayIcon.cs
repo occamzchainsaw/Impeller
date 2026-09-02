@@ -1,0 +1,124 @@
+using H.NotifyIcon;
+using Impeller.App.ViewModels.Engine;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+
+namespace Impeller.App.Shell;
+
+/// <summary>
+/// The notification-area icon, and the window's relationship with it.
+/// </summary>
+/// <remarks>
+/// <para>
+/// This is the visible half of the two-process split. The engine is a service and keeps controlling
+/// fans whether or not this window exists — but a window that vanishes when closed leaves no way to
+/// tell that from an app that quit, and the second reading is the one people reach for. An icon that
+/// stays is the answer.
+/// </para>
+/// <para>
+/// Closing hides rather than exits, so the icon outlives the window. Exiting is a deliberate choice
+/// from the icon's own menu, and it stops the shell, not the fans.
+/// </para>
+/// </remarks>
+public sealed class TrayIcon : IDisposable
+{
+    private readonly TaskbarIcon _icon;
+    private readonly Window _window;
+    private readonly EngineConnection _connection;
+
+    private bool _exiting;
+
+    public TrayIcon(Window window, EngineConnection connection)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        ArgumentNullException.ThrowIfNull(connection);
+
+        _window = window;
+        _connection = connection;
+
+        var show = new MenuFlyoutItem { Text = "Show Impeller" };
+        show.Click += (_, _) => Show();
+
+        var exit = new MenuFlyoutItem { Text = "Exit" };
+        exit.Click += (_, _) => Exit();
+
+        _icon = new TaskbarIcon
+        {
+            ToolTipText = "Impeller",
+            ContextFlyout = new MenuFlyout { Items = { show, new MenuFlyoutSeparator(), exit } },
+        };
+
+        _icon.LeftClickCommand = new ShowCommand(Show);
+        _icon.ForceCreate();
+
+        _connection.PropertyChanged += OnConnectionChanged;
+        _window.Closed += OnWindowClosed;
+
+        UpdateToolTip();
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _connection.PropertyChanged -= OnConnectionChanged;
+        _window.Closed -= OnWindowClosed;
+        _icon.Dispose();
+    }
+
+    private void Show()
+    {
+        _window.AppWindow.Show();
+        _window.Activate();
+    }
+
+    private void Exit()
+    {
+        _exiting = true;
+        _window.Close();
+    }
+
+    /// <summary>
+    /// Hides the window instead of letting it close, unless the user asked to exit.
+    /// </summary>
+    /// <remarks>
+    /// The engine is untouched either way. What this preserves is the icon, and with it the only
+    /// visible evidence that the fans are still being managed.
+    /// </remarks>
+    private void OnWindowClosed(object sender, WindowEventArgs args)
+    {
+        if (_exiting)
+        {
+            return;
+        }
+
+        args.Handled = true;
+        _window.AppWindow.Hide();
+    }
+
+    private void OnConnectionChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e) =>
+        UpdateToolTip();
+
+    /// <summary>
+    /// Puts the engine's state where hovering finds it.
+    /// </summary>
+    /// <remarks>
+    /// The tooltip is the whole point of the icon while the window is hidden. "Impeller" alone
+    /// answers nothing; whether the engine is reachable is the one thing worth knowing from here.
+    /// </remarks>
+    private void UpdateToolTip() =>
+        _icon.ToolTipText = $"Impeller — {_connection.StatusMessage}";
+
+    /// <summary>A command with no state, for the icon's own click.</summary>
+    private sealed class ShowCommand(Action show) : System.Windows.Input.ICommand
+    {
+        public event EventHandler? CanExecuteChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public bool CanExecute(object? parameter) => true;
+
+        public void Execute(object? parameter) => show();
+    }
+}
