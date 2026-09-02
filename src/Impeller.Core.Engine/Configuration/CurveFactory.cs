@@ -190,6 +190,7 @@ public static class CurveFactory
             StartDuty = definition.StartDuty,
             StopDuty = definition.StopDuty,
             PairedFanSensorId = definition.PairedFanSensorId,
+            ManualDuty = definition.ManualDuty,
         };
     }
 
@@ -220,6 +221,7 @@ public static class CurveFactory
             StartDuty = binding.StartDuty,
             StopDuty = binding.StopDuty,
             PairedFanSensorId = binding.PairedFanSensorId,
+            ManualDuty = binding.ManualDuty,
             Calibration = calibration,
         };
     }

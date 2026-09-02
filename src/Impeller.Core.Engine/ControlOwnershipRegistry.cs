@@ -27,6 +27,17 @@ public sealed class ControlOwnershipRegistry(TimeProvider timeProvider)
 
     private bool _grantsSuspended;
 
+    /// <summary>
+    /// Who the engine records as holding a control the user pinned by hand.
+    /// </summary>
+    /// <remarks>
+    /// One id for every shell rather than one each, so closing a window and opening another does not
+    /// strand a fan under a claim nothing can release. It lives here rather than with the channel
+    /// because the engine also takes this claim on its own behalf, restoring a pin from a saved
+    /// configuration before any shell has connected.
+    /// </remarks>
+    public const string ManualClaimant = "shell";
+
     /// <summary>Raised after ownership of a control changes, for the UI and for diagnostics.</summary>
     public event EventHandler<ControlOwnershipChange>? OwnershipChanged;
 

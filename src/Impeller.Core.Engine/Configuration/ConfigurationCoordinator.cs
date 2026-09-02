@@ -157,6 +157,48 @@ public sealed class ConfigurationCoordinator(
         return validation;
     }
 
+    /// <summary>
+    /// Records that a control has been pinned by hand, or released, and saves.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not a full apply. The loop already holds the live claim by the time this is
+    /// called, so re-applying would rebuild every curve to write one number — and would reset the
+    /// state of any curve that keeps its own, which is most of the interesting ones.
+    /// </remarks>
+    /// <returns>Whether the configuration named that control at all.</returns>
+    public bool RecordManualDuty(SensorId controlId, Duty? duty)
+    {
+        var index = -1;
+
+        for (var i = 0; i < Current.Controls.Count; i++)
+        {
+            if (Current.Controls[i].ControlId == controlId)
+            {
+                index = i;
+                break;
+            }
+        }
+
+        if (index < 0)
+        {
+            return false;
+        }
+
+        var controls = Current.Controls.ToArray();
+        if (controls[index].ManualDuty == duty)
+        {
+            return true;
+        }
+
+        controls[index] = controls[index] with { ManualDuty = duty };
+
+        Current = Current with { Controls = [.. controls] };
+        Save(Current);
+
+        Changed?.Invoke(this, new ConfigurationChanged(CurrentName, Current, LastValidation));
+        return true;
+    }
+
     /// <summary>Writes a configuration to disk without applying it.</summary>
     public void Save(ImpellerConfiguration configuration)
     {

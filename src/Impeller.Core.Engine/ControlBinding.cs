@@ -75,6 +75,12 @@ public sealed class ControlBinding(SensorId controlId)
     public Duty StopDuty { get; set; } = Duty.Off;
 
     /// <summary>
+    /// The duty this control was pinned at by hand, or <see langword="null"/> when its curve drives
+    /// it. Restored as a manual claim when the configuration is applied.
+    /// </summary>
+    public Duty? ManualDuty { get; set; }
+
+    /// <summary>
     /// The tach sensor for this fan, if one has been paired with it.
     /// </summary>
     /// <remarks>

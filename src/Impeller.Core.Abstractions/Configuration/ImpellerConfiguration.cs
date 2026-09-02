@@ -101,6 +101,17 @@ public sealed record ControlBindingDefinition
     public SensorId PairedFanSensorId { get; init; } = SensorId.None;
 
     /// <summary>
+    /// The duty this control is pinned at by hand, or <see langword="null"/> when its curve drives it.
+    /// </summary>
+    /// <remarks>
+    /// Persisted, so a fan the user pinned is still pinned after a restart or a reboot rather than
+    /// quietly reverting to its curve. A pin is a deliberate instruction and outlives the process
+    /// that took it; the transient case — spinning one fan up briefly to find it — has its own path
+    /// that releases on a timer and never reaches this field.
+    /// </remarks>
+    public Duty? ManualDuty { get; init; }
+
+    /// <summary>
     /// Measured duty-to-speed points for this fan.
     /// </summary>
     /// <remarks>

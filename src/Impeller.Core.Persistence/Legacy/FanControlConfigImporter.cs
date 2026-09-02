@@ -451,7 +451,14 @@ public sealed class FanControlConfigImporter(ISensorIdentityMap identityMap)
                     curveId = CurveId.None;
                 }
 
-                var enabled = (Flag(node, "Enable") ?? false) && !curveId.IsNone;
+                var pinned = Flag(node, "ManualControl") == true
+                    ? new Duty(Integer(node, "ManualControlValue") ?? 0)
+                    : (Duty?)null;
+
+                // A pinned fan counts as something to drive. Left disabled it would be ignored
+                // entirely, which for a fan pinned at zero looks identical right up until the
+                // firmware decides otherwise.
+                var enabled = (Flag(node, "Enable") ?? false) && (!curveId.IsNone || pinned is not null);
 
                 ReportUnmodelledControlSettings(node, nickname);
 
@@ -472,12 +479,19 @@ public sealed class FanControlConfigImporter(ISensorIdentityMap identityMap)
 
                     PairedFanSensorId = ResolveSensorReference(
                         node["PairedFanSensor"], nickname, "paired fan sensor"),
+
+                    // A fan pinned by hand stays pinned across the import, the same way it stays
+                    // pinned across a restart.
+                    ManualDuty = pinned,
                     Calibration = [.. ReadCalibration(node)],
                 });
 
-                Note(ImportOutcome.Imported, nickname, enabled
-                    ? $"Driven by '{curveName}'."
-                    : "Imported, but left switched off.");
+                Note(ImportOutcome.Imported, nickname, (pinned, enabled) switch
+                {
+                    ({ } duty, _) => $"Pinned by hand at {duty}.",
+                    (_, true) => $"Driven by '{curveName}'.",
+                    _ => "Imported, but left switched off.",
+                });
             }
 
             return result;
@@ -500,15 +514,6 @@ public sealed class FanControlConfigImporter(ISensorIdentityMap identityMap)
                     nickname,
                     $"Had a {offset:0.#} point offset applied to its curve. Impeller has no per-control "
                     + "offset; adjust the curve itself if you need it back.");
-            }
-
-            if (Flag(node, "ManualControl") == true)
-            {
-                Note(
-                    ImportOutcome.Adjusted,
-                    nickname,
-                    "Was under manual control. Manual overrides are not saved in Impeller; the fan now "
-                    + "follows its curve.");
             }
 
             if (Flag(node, "ForceApply") == true)

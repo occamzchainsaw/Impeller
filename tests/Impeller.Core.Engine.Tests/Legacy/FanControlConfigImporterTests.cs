@@ -135,18 +135,42 @@ public class FanControlConfigImporterTests
     }
 
     [Fact]
-    public void A_control_with_no_curve_behind_it_is_imported_switched_off()
+    public void A_control_with_no_curve_and_no_pin_is_imported_switched_off()
+    {
+        var control = Control("/lpc/nct6687d/control/1", curveName: null, calibrated: false);
+        var result = new FanControlConfigImporter(LiveHardware()).Import(Document(controls: [control]), "t");
+
+        // Nothing to drive it from, so enabling it would have the engine writing a duty it has no
+        // basis for.
+        Assert.False(Assert.Single(result.Configuration.Controls).Enabled);
+    }
+
+    [Fact]
+    public void A_fan_the_user_had_pinned_by_hand_comes_across_still_pinned()
     {
         var map = LiveHardware();
         var result = ImportFixture(map);
 
-        // Channel 4 was enabled in the source but had no curve selected. Enabling it here would mean
-        // the engine driving a fan with nothing to drive it from.
+        // Channel 4 was pinned at zero: a fan deliberately stopped, with no curve behind it.
+        // Importing that as "follows its curve" would start it turning again.
         map.TryGet(new HardwareFingerprint("lhm", SuperIo, 4, SensorKind.Control), out var expected);
 
         var control = result.Configuration.Controls.Single(c => c.ControlId == expected);
-        Assert.False(control.Enabled);
+        Assert.Equal(Duty.Off, control.ManualDuty);
         Assert.True(control.CurveId.IsNone);
+
+        // Enabled, because a disabled control is left alone entirely and the pin would do nothing.
+        Assert.True(control.Enabled);
+    }
+
+    [Fact]
+    public void A_fan_that_was_not_pinned_arrives_with_no_pin()
+    {
+        var result = ImportFixture(LiveHardware());
+
+        Assert.All(
+            result.Configuration.Controls.Where((_, i) => i != 4),
+            control => Assert.Null(control.ManualDuty));
     }
 
     [Fact]

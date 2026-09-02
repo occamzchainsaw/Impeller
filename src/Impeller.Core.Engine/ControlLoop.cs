@@ -95,6 +95,44 @@ public sealed class ControlLoop(
         _orderedCurves = order.Ordered;
         _bindings = bound;
         _startStop = bound.ToDictionary(entry => entry.Key, entry => new StartStopGate(entry.Value));
+
+        RestoreManualPins(bound.Values);
+    }
+
+    /// <summary>
+    /// Takes back the manual claims a saved configuration describes.
+    /// </summary>
+    /// <remarks>
+    /// A pin the user set is an instruction, not a session detail, so it survives a restart. This
+    /// runs on every configure rather than only at startup, which also means a pin removed from an
+    /// edited configuration is released rather than left holding the fan.
+    /// </remarks>
+    private void RestoreManualPins(IEnumerable<ControlBinding> bindings)
+    {
+        foreach (var binding in bindings)
+        {
+            var owner = _ownership.GetOwner(binding.ControlId);
+
+            if (binding.ManualDuty is { } pinned)
+            {
+                // Anything already holding it stays: a plugin mid-claim, or a failsafe that has not
+                // cleared, both outrank a stored value.
+                if (owner.IsCurve)
+                {
+                    _ownership.TryAcquire(
+                        binding.ControlId,
+                        ControlOwnerKind.ManualOverride,
+                        ControlOwnershipRegistry.ManualClaimant);
+                }
+
+                TrySetRequestedDuty(binding.ControlId, pinned, ControlOwnershipRegistry.ManualClaimant);
+            }
+            else if (owner.Kind == ControlOwnerKind.ManualOverride
+                && string.Equals(owner.ClaimantId, ControlOwnershipRegistry.ManualClaimant, StringComparison.Ordinal))
+            {
+                _ownership.Release(binding.ControlId, ControlOwnershipRegistry.ManualClaimant);
+            }
+        }
     }
 
     /// <summary>

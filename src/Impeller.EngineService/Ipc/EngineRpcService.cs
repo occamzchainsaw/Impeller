@@ -31,14 +31,8 @@ public sealed class EngineRpcService(
     TimeProvider timeProvider,
     EngineWorkerState workerState) : IEngineControl
 {
-    /// <summary>
-    /// Who the engine records as holding a manually overridden control.
-    /// </summary>
-    /// <remarks>
-    /// One claimant id for every shell rather than one each, so closing a window and opening
-    /// another does not strand a fan under a claim nothing can release.
-    /// </remarks>
-    public const string ManualClaimant = "shell";
+    /// <summary>Who the engine records as holding a manually overridden control.</summary>
+    public const string ManualClaimant = ControlOwnershipRegistry.ManualClaimant;
 
     /// <inheritdoc />
     public Task<EngineSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default) =>
@@ -96,14 +90,52 @@ public sealed class EngineRpcService(
         Task.FromResult(coordinator.Delete(name));
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The pin is written to the configuration as well as taken, so it is still in force after a
+    /// restart. Pinning a fan is an instruction, not a property of the session that issued it.
+    /// </remarks>
     public Task<ControlAcquireOutcome> SetManualDutyAsync(
         SensorId controlId,
         Duty duty,
         CancellationToken cancellationToken = default)
     {
+        var outcome = Pin(controlId, duty);
+
+        if (outcome.Granted)
+        {
+            coordinator.RecordManualDuty(controlId, duty);
+        }
+
+        return Task.FromResult(outcome);
+    }
+
+    /// <inheritdoc />
+    public Task<bool> ReleaseControlAsync(SensorId controlId, CancellationToken cancellationToken = default)
+    {
+        var released = ownership.Release(controlId, ManualClaimant);
+
+        if (released)
+        {
+            coordinator.RecordManualDuty(controlId, null);
+        }
+
+        return Task.FromResult(released);
+    }
+
+    /// <summary>
+    /// Takes the manual claim and sets the duty, without recording anything.
+    /// </summary>
+    /// <remarks>
+    /// Shared by pinning and identifying, which differ in exactly one way: a pin is remembered and
+    /// an identify is not. Keeping the claim logic here and the saving at the call site is what
+    /// stops a fan briefly spun up to locate it from being written into the configuration as the
+    /// user's intent.
+    /// </remarks>
+    private ControlAcquireOutcome Pin(SensorId controlId, Duty duty)
+    {
         if (registry.GetControl(controlId) is null)
         {
-            return Task.FromResult(Refused(ControlAcquireFailure.UnknownControl, null));
+            return Refused(ControlAcquireFailure.UnknownControl, null);
         }
 
         var owner = ownership.GetOwner(controlId);
@@ -115,37 +147,34 @@ public sealed class EngineRpcService(
 
             if (!acquired.Succeeded)
             {
-                return Task.FromResult(Refused(acquired.Failure, acquired.CurrentOwner));
+                return Refused(acquired.Failure, acquired.CurrentOwner);
             }
         }
 
         loop.TrySetRequestedDuty(controlId, duty, ManualClaimant);
-        return Task.FromResult(new ControlAcquireOutcome(true, default, ControlOwnerKind.ManualOverride, ManualClaimant));
+        return new ControlAcquireOutcome(true, default, ControlOwnerKind.ManualOverride, ManualClaimant);
     }
 
     /// <inheritdoc />
-    public Task<bool> ReleaseControlAsync(SensorId controlId, CancellationToken cancellationToken = default) =>
-        Task.FromResult(ownership.Release(controlId, ManualClaimant));
-
-    /// <inheritdoc />
-    public async Task<ControlAcquireOutcome> IdentifyControlAsync(
+    public Task<ControlAcquireOutcome> IdentifyControlAsync(
         SensorId controlId,
         Duty duty,
         TimeSpan duration,
         CancellationToken cancellationToken = default)
     {
-        var outcome = await SetManualDutyAsync(controlId, duty, cancellationToken).ConfigureAwait(false);
+        // Not recorded: finding which fan is which is not a statement about how it should run.
+        var outcome = Pin(controlId, duty);
 
         if (!outcome.Granted)
         {
-            return outcome;
+            return Task.FromResult(outcome);
         }
 
         // Released by the engine on a timer rather than by the caller. A shell that crashes
         // halfway through identifying a fan must not leave it pinned at full speed forever.
         _ = ReleaseAfterAsync(controlId, duration);
 
-        return outcome;
+        return Task.FromResult(outcome);
     }
 
     private async Task ReleaseAfterAsync(SensorId controlId, TimeSpan duration)
