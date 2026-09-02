@@ -1,4 +1,5 @@
 using Impeller.Core.Abstractions;
+using Impeller.Core.Abstractions.Configuration;
 
 namespace Impeller.Core.Engine;
 
@@ -93,6 +94,16 @@ public sealed class ControlBinding(SensorId controlId)
     public TimeSpan StartKickDuration { get; set; } = TimeSpan.FromSeconds(6);
 
     /// <summary>
+    /// This fan's measured duty-to-speed points, including any bands marked as ones to avoid.
+    /// </summary>
+    /// <remarks>
+    /// Carried on the live binding rather than only on the stored definition because the engine
+    /// reads it every tick: an avoided band is a rule about what may be commanded, not a note about
+    /// what was once measured.
+    /// </remarks>
+    public EquatableArray<CalibrationPointDefinition> Calibration { get; set; } = [];
+
+    /// <summary>
     /// The duty at or below which this control is commanded off instead.
     /// </summary>
     /// <remarks>
@@ -127,6 +138,47 @@ public sealed class ControlBinding(SensorId controlId)
         }
 
         return duty > MaximumDuty ? MaximumDuty : duty;
+    }
+
+    /// <summary>
+    /// Applies this binding's floor and ceiling, then steps the result out of any avoided band.
+    /// </summary>
+    /// <param name="duty">What the owner asked for.</param>
+    /// <param name="current">
+    /// The duty standing now, which is what decides which way out of a band the fan takes.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// Direction of travel picks the edge, but the limits get the final say: an edge outside the
+    /// floor or ceiling is not somewhere this control may go, so the other edge is taken instead.
+    /// That only comes up on a band sitting against one of the limits, and it is the difference
+    /// between crossing the band and being clamped back into the middle of it.
+    /// </para>
+    /// <para>
+    /// When both edges are out of range there is nowhere legal outside the band, and the limits
+    /// win. The choice there is between a fan making a noise the user knows about and a fan running
+    /// outside the range the user set, and the second is us ignoring an instruction.
+    /// </para>
+    /// </remarks>
+    public Duty Resolve(Duty duty, Duty current)
+    {
+        var limited = ApplyLimits(duty);
+
+        if (Calibration.Count == 0
+            || !CalibrationTable.TryFindAvoidedBand(Calibration, limited, out var below, out var above))
+        {
+            return limited;
+        }
+
+        var preferred = limited >= current ? above : below;
+        var fallback = limited >= current ? below : above;
+
+        if (ApplyLimits(preferred) == preferred)
+        {
+            return preferred;
+        }
+
+        return ApplyLimits(fallback) == fallback ? fallback : limited;
     }
 
     /// <summary>

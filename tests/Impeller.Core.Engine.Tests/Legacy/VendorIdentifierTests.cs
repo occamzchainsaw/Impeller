@@ -77,7 +77,7 @@ public class VendorIdentifierTests
     public void A_card_referenced_by_name_resolves_to_the_control_that_is_actually_here()
     {
         var registry = Machine();
-        VendorIdentifier.TryParse("ADLX/AMD Radeon RX 7800 XT/768/control", out var reference);
+        Assert.True(VendorIdentifier.TryParse("ADLX/AMD Radeon RX 7800 XT/768/control", out var reference));
 
         var sensor = VendorIdentifier.Resolve(reference, registry, out var ambiguous);
 
@@ -94,10 +94,10 @@ public class VendorIdentifierTests
         // give the start/stop logic a duty where it expects a speed.
         var registry = Machine();
 
-        VendorIdentifier.TryParse("ADLX/AMD Radeon RX 7800 XT/768/fan", out var fan);
+        Assert.True(VendorIdentifier.TryParse("ADLX/AMD Radeon RX 7800 XT/768/fan", out var fan));
         Assert.Equal(SensorKind.FanSpeed, VendorIdentifier.Resolve(fan, registry, out _)!.Kind);
 
-        VendorIdentifier.TryParse("ADLX/AMD Radeon RX 7800 XT/768/control", out var control);
+        Assert.True(VendorIdentifier.TryParse("ADLX/AMD Radeon RX 7800 XT/768/control", out var control));
         Assert.Equal(SensorKind.Control, VendorIdentifier.Resolve(control, registry, out _)!.Kind);
     }
 
@@ -110,7 +110,7 @@ public class VendorIdentifierTests
         // The two backends do not agree on names: "Hotspot" against "GPU Hot Spot", "GPU" against
         // "GPU Core". Matching on the string would pick the wrong sensor or none.
         var registry = Machine();
-        VendorIdentifier.TryParse($"ADLX/AMD Radeon RX 7800 XT/768/temp/{detail}", out var reference);
+        Assert.True(VendorIdentifier.TryParse($"ADLX/AMD Radeon RX 7800 XT/768/temp/{detail}", out var reference));
 
         Assert.Equal(expected, VendorIdentifier.Resolve(reference, registry, out _)!.Name);
     }
@@ -121,7 +121,7 @@ public class VendorIdentifierTests
         // AMD exposes an intake sensor; LibreHardwareMonitor does not. Handing back the core
         // temperature instead would read plausibly and be wrong.
         var registry = Machine();
-        VendorIdentifier.TryParse("ADLX/AMD Radeon RX 7800 XT/768/temp/Intake", out var reference);
+        Assert.True(VendorIdentifier.TryParse("ADLX/AMD Radeon RX 7800 XT/768/temp/Intake", out var reference));
 
         Assert.Null(VendorIdentifier.Resolve(reference, registry, out _));
     }
@@ -130,7 +130,7 @@ public class VendorIdentifierTests
     public void A_card_that_is_not_in_the_machine_resolves_to_nothing()
     {
         var registry = Machine();
-        VendorIdentifier.TryParse("ADLX/AMD Radeon RX 9070 XT/768/control", out var reference);
+        Assert.True(VendorIdentifier.TryParse("ADLX/AMD Radeon RX 9070 XT/768/control", out var reference));
 
         Assert.Null(VendorIdentifier.Resolve(reference, registry, out _));
     }
@@ -141,7 +141,7 @@ public class VendorIdentifierTests
         var registry = Machine();
         registry.Add(new FakeControl("AMD Radeon RX 7800 XT - GPU Fan"));
 
-        VendorIdentifier.TryParse("ADLX/AMD Radeon RX 7800 XT/768/control", out var reference);
+        Assert.True(VendorIdentifier.TryParse("ADLX/AMD Radeon RX 7800 XT/768/control", out var reference));
 
         // Name is all there is to go on, so two of the same card cannot be told apart. Resolving to
         // the first is more useful than refusing; saying so is what stops it being a silent guess.

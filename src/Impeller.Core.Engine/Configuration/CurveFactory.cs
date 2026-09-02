@@ -191,22 +191,28 @@ public static class CurveFactory
             StopDuty = definition.StopDuty,
             PairedFanSensorId = definition.PairedFanSensorId,
             ManualDuty = definition.ManualDuty,
+            Calibration = definition.Calibration,
         };
     }
 
     /// <summary>
-    /// Describes a binding, preserving the calibration table it was built with.
+    /// Describes a binding.
     /// </summary>
-    /// <remarks>
-    /// Calibration is measured, not configured, and the engine does not currently act on the
-    /// table beyond start and stop — so it lives on the definition rather than the live binding
-    /// and is carried across here rather than reconstructed.
-    /// </remarks>
+    /// <param name="binding">The live binding to describe.</param>
+    /// <param name="calibration">
+    /// A table to record in place of the binding's own — which is how a finished calibration run
+    /// gets written back. Leave it empty to keep whatever the binding already carries.
+    /// </param>
     public static ControlBindingDefinition Describe(
         ControlBinding binding,
         EquatableArray<CalibrationPointDefinition> calibration = default)
     {
         ArgumentNullException.ThrowIfNull(binding);
+
+        if (calibration.Count == 0)
+        {
+            calibration = binding.Calibration;
+        }
 
         return new ControlBindingDefinition
         {

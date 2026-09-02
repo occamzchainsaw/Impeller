@@ -285,7 +285,7 @@ public sealed class ControlLoop(
                 ? last
                 : control.CommandedDuty ?? target;
 
-            var limited = binding.ApplyLimits(target);
+            var limited = binding.Resolve(target, current);
 
             // Start and stop handling wraps the ramp limiter rather than following it: a fan being
             // kicked into motion needs its start duty immediately, and easing up to it is exactly
