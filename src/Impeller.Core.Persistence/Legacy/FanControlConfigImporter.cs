@@ -21,12 +21,22 @@ namespace Impeller.Core.Persistence.Legacy;
 /// because a fan curve that is subtly wrong is harder to notice than one that is obviously missing.
 /// </para>
 /// </remarks>
-public sealed class FanControlConfigImporter(ISensorIdentityMap identityMap)
+public sealed class FanControlConfigImporter(ISensorIdentityMap identityMap, ISensorRegistry? registry = null)
 {
     private const string SectionName = "FanControl";
 
     private readonly ISensorIdentityMap _identityMap =
         identityMap ?? throw new ArgumentNullException(nameof(identityMap));
+
+    /// <summary>
+    /// What the machine currently has, used to repair graphics-card references.
+    /// </summary>
+    /// <remarks>
+    /// Optional, and the import works without it — every motherboard reference resolves through the
+    /// identity map alone. It is needed only for vendor identifiers, which name a card rather than a
+    /// fingerprint and so can only be resolved by looking at what is here.
+    /// </remarks>
+    private readonly ISensorRegistry? _registry = registry;
 
     /// <summary>Whether a document looks like a configuration this importer can read.</summary>
     public static bool LooksLegacy(JsonObject? document) =>
@@ -72,7 +82,7 @@ public sealed class FanControlConfigImporter(ISensorIdentityMap identityMap)
                 $"No '{SectionName}' section: this does not look like a FanControl configuration.");
         }
 
-        var session = new Session(_identityMap);
+        var session = new Session(_identityMap, _registry);
 
         var sensors = session.ReadCustomSensors(Array(section, "CustomSensors"));
         var curves = session.ReadCurves(Array(section, "FanCurves"), Array(section, "Controls"));
@@ -98,7 +108,7 @@ public sealed class FanControlConfigImporter(ISensorIdentityMap identityMap)
     /// The state one import needs: the notes, and the two lookup tables that let names and paths in
     /// the source become ids in the output.
     /// </summary>
-    private sealed class Session(ISensorIdentityMap identityMap)
+    private sealed class Session(ISensorIdentityMap identityMap, ISensorRegistry? registry)
     {
         private readonly Dictionary<string, SensorId> _customSensorIds = new(StringComparer.Ordinal);
         private readonly Dictionary<string, CurveId> _curveIds = new(StringComparer.Ordinal);
@@ -686,6 +696,11 @@ public sealed class FanControlConfigImporter(ISensorIdentityMap identityMap)
                 }
             }
 
+            if (ResolveVendor(identifier, subject, role) is { } aliased)
+            {
+                return aliased;
+            }
+
             var pending = LegacyIdentifier.PendingBackend(identifier);
 
             Note(
@@ -693,10 +708,44 @@ public sealed class FanControlConfigImporter(ISensorIdentityMap identityMap)
                 subject,
                 pending is null
                     ? $"Its {role} '{identifier}' is not present on this machine. Pick a replacement."
-                    : $"Its {role} is on the {pending} card, which needs a graphics backend Impeller does "
-                      + "not have yet. Pick a replacement, or wait for that backend.");
+                    : $"Its {role} was read through the {pending} backend, and nothing matching it is "
+                      + "present here. Pick a replacement.");
 
             return SensorId.None;
+        }
+
+        /// <summary>
+        /// Repairs a graphics-card reference by matching the card's name against what is here.
+        /// </summary>
+        /// <remarks>
+        /// The vendor backends this replaces name a card and number it their own way, so nothing in
+        /// the stored identifier can be turned into a fingerprint arithmetically. Matching on the
+        /// card's name is weaker than a fingerprint and is used exactly once, during an import, to
+        /// turn a dead reference into a live one — after which the configuration holds a real id
+        /// like everything else.
+        /// </remarks>
+        private SensorId? ResolveVendor(string identifier, string subject, string role)
+        {
+            if (registry is null || !VendorIdentifier.TryParse(identifier, out var reference))
+            {
+                return null;
+            }
+
+            if (VendorIdentifier.Resolve(reference, registry, out var ambiguous) is not { } sensor)
+            {
+                return null;
+            }
+
+            Note(
+                ImportOutcome.Adjusted,
+                subject,
+                ambiguous
+                    ? $"Its {role} was read through the {reference.Vendor} backend; matched to "
+                      + $"'{sensor.Name}'. More than one card fitted that name — check it is the right one."
+                    : $"Its {role} was read through the {reference.Vendor} backend; now read directly "
+                      + $"from '{sensor.Name}'.");
+
+            return sensor.Id;
         }
 
         private string UniqueName(string name)

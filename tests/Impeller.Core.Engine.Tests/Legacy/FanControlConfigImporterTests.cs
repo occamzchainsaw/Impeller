@@ -47,6 +47,79 @@ public class FanControlConfigImporterTests
     private static ImportResult ImportFixture(ISensorIdentityMap map) =>
         new FanControlConfigImporter(map).ImportFile(FixturePath, "Imported");
 
+    /// <summary>
+    /// The graphics card as the engine reports it when running with the privileges it needs.
+    /// </summary>
+    /// <remarks>
+    /// These are the real names, measured from the service on the machine this fixture came from.
+    /// The card's temperatures, its tach and a writable fan control are all there — which is why
+    /// there is no vendor backend, and why an import that is given a registry can repair the
+    /// references a vendor backend would otherwise have been needed for.
+    /// </remarks>
+    private static FakeSensorRegistry GraphicsCard()
+    {
+        var registry = new FakeSensorRegistry();
+
+        registry.Add(new FakeSensor(SensorKind.Temperature, "AMD Radeon RX 7800 XT - GPU Core") { Value = 36f });
+        registry.Add(new FakeSensor(SensorKind.Temperature, "AMD Radeon RX 7800 XT - GPU Hot Spot") { Value = 42f });
+        registry.Add(new FakeSensor(SensorKind.FanSpeed, "AMD Radeon RX 7800 XT - GPU Fan") { Value = 0f });
+        registry.Add(new FakeControl("AMD Radeon RX 7800 XT - GPU Fan"));
+
+        return registry;
+    }
+
+    [Fact]
+    public void With_the_card_present_the_graphics_control_arrives_instead_of_being_reported()
+    {
+        var result = new FanControlConfigImporter(LiveHardware(), GraphicsCard())
+            .ImportFile(FixturePath, "Imported");
+
+        // Nine of nine. Without the card in view this is eight, and the ninth is a note.
+        Assert.Equal(9, result.Configuration.Controls.Count);
+        Assert.DoesNotContain(result.Unresolved, note => note.Message.Contains("AMD graphics", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_graphics_curve_gets_its_temperature_back()
+    {
+        var registry = GraphicsCard();
+        var result = new FanControlConfigImporter(LiveHardware(), registry).ImportFile(FixturePath, "Imported");
+
+        var gpu = Assert.IsType<AutoCurveDefinition>(
+            result.Configuration.Curves.Single(curve => curve.Name == "Auto GPU"));
+
+        var core = registry.Sensors.Single(sensor => sensor.Name.EndsWith("GPU Core", StringComparison.Ordinal));
+
+        Assert.Equal(core.Id, gpu.Source);
+        Assert.Contains(result.Adjusted, note => note.Subject == "Auto GPU");
+    }
+
+    [Fact]
+    public void The_mix_sensor_gets_both_of_its_sources_back()
+    {
+        var result = new FanControlConfigImporter(LiveHardware(), GraphicsCard())
+            .ImportFile(FixturePath, "Imported");
+
+        // CPU and GPU. Without the card, one of the two silently went missing.
+        Assert.Equal(2, Assert.Single(result.Configuration.CustomSensors).Sources.Count);
+    }
+
+    [Fact]
+    public void The_graphics_control_keeps_the_tach_it_was_paired_with()
+    {
+        var registry = GraphicsCard();
+        var result = new FanControlConfigImporter(LiveHardware(), registry).ImportFile(FixturePath, "Imported");
+
+        var control = registry.Controls.Single();
+        var tach = registry.Sensors.Single(sensor => sensor.Kind == SensorKind.FanSpeed);
+
+        var binding = result.Configuration.Controls.Single(c => c.ControlId == control.Id);
+
+        // Both are called "GPU Fan"; only the kind tells them apart. Pairing the control with itself
+        // would give the start-up logic a duty where it expects a speed.
+        Assert.Equal(tach.Id, binding.PairedFanSensorId);
+    }
+
     [Fact]
     public void Every_curve_in_the_file_arrives()
     {
@@ -273,20 +346,24 @@ public class FanControlConfigImporterTests
         Assert.Equal(80f, gpu.LoadTemperature, 3);
         Assert.Equal(80f, gpu.MaximumDuty.Percent, 3);
 
+        // Reported, not dropped -- and the note says which backend it came from, so the user knows
+        // what they are looking for when they pick a replacement.
         Assert.Contains(
             result.Unresolved,
-            note => note.Subject == "Auto GPU" && note.Message.Contains("ADLX", StringComparison.Ordinal));
+            note => note.Subject == "Auto GPU" && note.Message.Contains("AMD graphics", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void A_control_on_hardware_that_has_no_backend_yet_is_reported_rather_than_dropped_in_silence()
+    public void A_control_on_hardware_that_is_not_here_is_reported_rather_than_dropped_in_silence()
     {
+        // No registry, so the graphics card cannot be matched by name and its control has nowhere
+        // to land.
         var result = ImportFixture(LiveHardware());
 
         Assert.True(result.NeedsAttention);
         Assert.Contains(
             result.Unresolved,
-            note => note.Message.Contains("AMD (ADLX)", StringComparison.Ordinal));
+            note => note.Message.Contains("AMD graphics", StringComparison.Ordinal));
     }
 
     [Fact]

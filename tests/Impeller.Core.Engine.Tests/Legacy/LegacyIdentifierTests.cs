@@ -73,7 +73,7 @@ public class LegacyIdentifierTests
 
     [Theory]
     [InlineData("ADLX/AMD Radeon RX 7800 XT/768/temp/GPU")]
-    [InlineData("NvAPI/Some Card/0/temp/GPU")]
+    [InlineData("NVApiWrapper/0-Some Card/sensor/0")]
     [InlineData("Mix/CPU GPU Mix")]
     [InlineData("")]
     [InlineData("/lpc")]
@@ -84,11 +84,12 @@ public class LegacyIdentifierTests
     }
 
     [Theory]
-    [InlineData("ADLX/AMD Radeon RX 7800 XT/768/temp/GPU", "AMD (ADLX)")]
-    [InlineData("NvAPI/Some Card/0/temp/GPU", "NVIDIA (NvAPI)")]
-    public void A_vendor_identifier_names_the_backend_it_is_waiting_on(string identifier, string expected)
+    [InlineData("ADLX/AMD Radeon RX 7800 XT/768/temp/GPU", "AMD graphics")]
+    [InlineData("NVApiWrapper/0-Some Card/sensor/0", "NVIDIA graphics")]
+    public void A_vendor_identifier_names_the_backend_it_came_from(string identifier, string expected)
     {
-        // So the report can say what would fix it, rather than only that it failed.
+        // So a reference that cannot be repaired says where it came from rather than only that it
+        // failed. Note the NVIDIA prefix: the wrapper library's name is what got stored.
         Assert.Equal(expected, LegacyIdentifier.PendingBackend(identifier));
     }
 

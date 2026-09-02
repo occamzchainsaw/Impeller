@@ -15,8 +15,9 @@ namespace Impeller.Core.Persistence.Legacy;
 /// dependency on one particular hardware backend just to read a file.
 /// </para>
 /// <para>
-/// Vendor-specific identifiers (<c>ADLX/…</c>, <c>NvAPI/…</c>) are recognised well enough to be
-/// reported by name, and no further. They resolve once those backends exist.
+/// Vendor-specific identifiers (<c>ADLX/…</c>, <c>NVApiWrapper/…</c>) are not paths and get nothing
+/// from this class beyond being recognised well enough to name in a report. They are repaired by
+/// <see cref="VendorIdentifier"/>, which matches the card by name against what is present.
 /// </para>
 /// </remarks>
 public static class LegacyIdentifier
@@ -170,8 +171,11 @@ public static class LegacyIdentifier
     public static string? PendingBackend(string? identifier) => identifier switch
     {
         null => null,
-        _ when identifier.StartsWith("ADLX/", StringComparison.OrdinalIgnoreCase) => "AMD (ADLX)",
-        _ when identifier.StartsWith("NvAPI/", StringComparison.OrdinalIgnoreCase) => "NVIDIA (NvAPI)",
+        _ when identifier.StartsWith("ADLX/", StringComparison.OrdinalIgnoreCase) => "AMD graphics",
+
+        // NVApiWrapper, not NvAPI: the wrapper library's name is what ends up in the stored
+        // identifier, and a configuration off an NVIDIA machine spells it that way.
+        _ when identifier.StartsWith("NVApiWrapper/", StringComparison.OrdinalIgnoreCase) => "NVIDIA graphics",
         _ => null,
     };
 }
