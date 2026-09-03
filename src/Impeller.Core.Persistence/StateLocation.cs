@@ -1,4 +1,4 @@
-namespace Impeller.Core.Persistence;
+﻿namespace Impeller.Core.Persistence;
 
 /// <summary>
 /// Decides where this installation keeps its configurations and its identity map.
@@ -24,6 +24,9 @@ public static class StateLocation
 
     /// <summary>The file remembering which configuration was last loaded.</summary>
     public const string SelectionName = "selected-configuration.json";
+
+    /// <summary>The file recording which plugins have been seen and what they were granted.</summary>
+    public const string PluginsName = "plugins.json";
 
     /// <summary>
     /// Works out the configuration folder, creating it if necessary.
@@ -149,6 +152,22 @@ public static class StateLocation
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(configurationRoot);
         return Beside(configurationRoot, SelectionName);
+    }
+
+    /// <summary>
+    /// Where the record of plugin approvals and grants lives.
+    /// </summary>
+    /// <remarks>
+    /// Beside the configuration folder, like everything else describing the installation rather
+    /// than a configuration's contents, and for the concrete reason the identity map taught us:
+    /// anything ending in <c>.json</c> inside that folder is offered to the user as a configuration
+    /// they could load. It also must not travel: a configuration copied to another machine carries
+    /// curves, and must not carry that machine's decisions about which programs may drive its fans.
+    /// </remarks>
+    public static string ResolvePlugins(string configurationRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(configurationRoot);
+        return Beside(configurationRoot, PluginsName);
     }
 
     /// <summary>The path a file takes when it belongs next to the configuration folder, not inside it.</summary>

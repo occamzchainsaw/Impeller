@@ -1,6 +1,13 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
+  <!--
+    The engine side of the plugin channel. It sees both vocabularies - the engine's and the
+    plugins' - because it is the only thing that should: PluginTranslation is the entire price of
+    Impeller.Plugins.Abstractions referencing nothing.
+  -->
   <ItemGroup>
+    <ProjectReference Include="..\Impeller.Core.Abstractions\Impeller.Core.Abstractions.csproj" />
+    <ProjectReference Include="..\Impeller.Core.Persistence\Impeller.Core.Persistence.csproj" />
     <ProjectReference Include="..\Impeller.Plugins.Abstractions\Impeller.Plugins.Abstractions.csproj" />
   </ItemGroup>
 
