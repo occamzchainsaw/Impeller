@@ -1,4 +1,4 @@
-namespace Impeller.Core.Abstractions;
+﻿namespace Impeller.Core.Abstractions;
 
 /// <summary>
 /// Who is currently driving a control.
@@ -60,7 +60,14 @@ public enum ControlAcquireFailure
     /// <summary>No control with that id exists.</summary>
     UnknownControl = 0,
 
-    /// <summary>The caller was not granted write access to this control in its manifest.</summary>
+    /// <summary>
+    /// The caller has not been granted write access to this control.
+    /// </summary>
+    /// <remarks>
+    /// A plugin manifest <em>requests</em> capabilities; the user grants them, one control at a
+    /// time. This is the refusal a plugin sees when it claims a fan nobody has ticked for it, and
+    /// it is an ordinary state rather than an error — the user may not have been asked yet.
+    /// </remarks>
     NotPermitted,
 
     /// <summary>Someone else already holds it. Deliberately not queued — the caller decides what to do.</summary>
@@ -68,6 +75,25 @@ public enum ControlAcquireFailure
 
     /// <summary>The engine is shutting down or in a failsafe state and is not granting claims.</summary>
     EngineUnavailable,
+
+    /// <summary>
+    /// The engine is not driving this control, so there is nothing to take over.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A control is claimable only while it is enabled in the current configuration and has a curve
+    /// assigned. The curve is what the control returns to when the claim ends, by release or by the
+    /// claimant dying; without one there is no state to fall back to, and the claimant would be the
+    /// only thing standing between the fan and a stopped fan.
+    /// </para>
+    /// <para>
+    /// This is a refusal rather than a silent no-op because the tick loop skips a disabled binding
+    /// before it looks at ownership: a claim on one would be granted, accepted, and then have every
+    /// duty discarded without a word. The trap is that disabling the fan is exactly what a careful
+    /// user does so that two programs do not fight over it.
+    /// </para>
+    /// </remarks>
+    NotDriven,
 }
 
 /// <summary>

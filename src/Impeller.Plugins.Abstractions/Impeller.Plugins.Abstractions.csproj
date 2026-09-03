@@ -1,9 +1,16 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
-  <ItemGroup>
-    <ProjectReference Include="..\Impeller.Core.Abstractions\Impeller.Core.Abstractions.csproj" />
-  </ItemGroup>
+  <!--
+    Deliberately references nothing.
 
+    This is what a third-party plugin takes a permanent dependency on, so every reference added
+    here is one an author cannot get rid of. Referencing Impeller.Core.Abstractions — which it used
+    to — would have dragged the whole configuration model into that surface: curve definitions,
+    calibration tables, provider interfaces, the identity map. A plugin that wants to drive a fan
+    should not have to take a version dependency on what a curve is.
+
+    The cost is a small translation layer in Impeller.Plugins.Host. It is the right side to pay on.
+  -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
