@@ -88,6 +88,11 @@ builder.Services.AddSingleton<ControlLoop>();
 builder.Services.AddSingleton(
     new ConfigStore(configurationRoot, new MigrationRunner([], currentVersion: 0)));
 
+// Which configuration is in force, remembered across restarts. Without it the engine comes back on
+// whatever the settings file names, and switching configuration silently undoes itself at the next
+// reboot.
+builder.Services.AddSingleton(new SelectedConfiguration(statePaths.SelectionPath));
+
 // The one thing that turns a stored document into a configured tick loop. Everything about a
 // configuration's life — reading, validating, materialising, saving — goes through it.
 builder.Services.AddSingleton<ConfigurationCoordinator>();

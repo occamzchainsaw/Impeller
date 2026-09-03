@@ -15,4 +15,7 @@ public sealed record EngineStatePaths(string ConfigurationRoot, bool Portable)
 
     /// <summary>The sensor identity map, which sits beside the configurations rather than among them.</summary>
     public string IdentityMapPath { get; init; } = StateLocation.ResolveIdentityMap(ConfigurationRoot);
+
+    /// <summary>Where the choice of configuration is remembered across restarts.</summary>
+    public string SelectionPath { get; init; } = StateLocation.ResolveSelection(ConfigurationRoot);
 }

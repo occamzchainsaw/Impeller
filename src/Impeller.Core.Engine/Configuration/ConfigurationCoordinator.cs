@@ -35,12 +35,23 @@ public sealed class ConfigurationCoordinator(
     ConfigStore store,
     ControlLoop loop,
     ISensorRegistry registry,
-    CustomSensorProvider? customSensors = null)
+    CustomSensorProvider? customSensors = null,
+    SelectedConfiguration? selection = null)
 {
     private readonly ConfigStore _store = store;
     private readonly ControlLoop _loop = loop;
     private readonly ISensorRegistry _registry = registry;
     private readonly CustomSensorProvider? _customSensors = customSensors;
+
+    /// <summary>
+    /// Where the choice of configuration is remembered across restarts.
+    /// </summary>
+    /// <remarks>
+    /// Optional so the coordinator can be built without touching the disk beyond the store itself,
+    /// which is what most of its tests want. An engine with no selection store simply forgets, which
+    /// is what it did before there was one.
+    /// </remarks>
+    private readonly SelectedConfiguration? _selection = selection;
 
     /// <summary>The default configuration name, used when nothing else has been chosen.</summary>
     public const string DefaultName = "Default";
@@ -78,6 +89,15 @@ public sealed class ConfigurationCoordinator(
     public ConfigurationValidation Start(string? name = null)
     {
         var target = string.IsNullOrWhiteSpace(name) ? DefaultName : name;
+
+        // What the user last switched to beats the settings file's default. Without this the engine
+        // comes back on "Default" after every restart, so choosing a configuration appears to work
+        // and then quietly undoes itself overnight. A remembered name whose file has since been
+        // deleted is ignored rather than regenerating an empty configuration under it.
+        if (_selection?.Read() is { } remembered && _store.Exists(remembered))
+        {
+            target = remembered;
+        }
 
         if (!_store.Exists(target))
         {
@@ -147,6 +167,11 @@ public sealed class ConfigurationCoordinator(
         Current = configuration;
         CurrentName = configuration.Name;
         LastValidation = validation;
+
+        // Recorded after the apply succeeded, never before. Remembering a configuration that was
+        // rejected would mean an engine that comes back on a broken one and cannot be talked out
+        // of it without editing a file by hand.
+        _selection?.Write(CurrentName);
 
         if (save)
         {

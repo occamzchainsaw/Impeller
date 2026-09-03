@@ -22,6 +22,9 @@ public static class StateLocation
     /// <summary>The file mapping this machine's hardware onto the ids configurations reference.</summary>
     public const string IdentityMapName = "sensor-identity.json";
 
+    /// <summary>The file remembering which configuration was last loaded.</summary>
+    public const string SelectionName = "selected-configuration.json";
+
     /// <summary>
     /// Works out the configuration folder, creating it if necessary.
     /// </summary>
@@ -110,11 +113,7 @@ public static class StateLocation
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(configurationRoot);
 
-        var parent = Path.GetDirectoryName(configurationRoot.TrimEnd(
-            Path.DirectorySeparatorChar,
-            Path.AltDirectorySeparatorChar));
-
-        var beside = Path.Combine(parent ?? configurationRoot, IdentityMapName);
+        var beside = Beside(configurationRoot, IdentityMapName);
         var legacy = Path.Combine(configurationRoot, IdentityMapName);
 
         if (File.Exists(beside) || !File.Exists(legacy))
@@ -136,6 +135,30 @@ public static class StateLocation
             // which fan is which.
             return legacy;
         }
+    }
+
+    /// <summary>
+    /// Where the record of which configuration is loaded lives.
+    /// </summary>
+    /// <remarks>
+    /// Beside the folder rather than in it, like everything else that describes the installation
+    /// rather than a configuration's contents — and, concretely, because anything ending in
+    /// <c>.json</c> inside that folder is listed to the user as a configuration they could load.
+    /// </remarks>
+    public static string ResolveSelection(string configurationRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(configurationRoot);
+        return Beside(configurationRoot, SelectionName);
+    }
+
+    /// <summary>The path a file takes when it belongs next to the configuration folder, not inside it.</summary>
+    private static string Beside(string configurationRoot, string fileName)
+    {
+        var parent = Path.GetDirectoryName(configurationRoot.TrimEnd(
+            Path.DirectorySeparatorChar,
+            Path.AltDirectorySeparatorChar));
+
+        return Path.Combine(parent ?? configurationRoot, fileName);
     }
 
     /// <summary>
