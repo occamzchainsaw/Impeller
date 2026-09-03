@@ -1,4 +1,4 @@
-using CommunityToolkit.Mvvm.ComponentModel;
+﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Impeller.App.ViewModels.Engine;
 using Impeller.Core.Abstractions;
@@ -278,6 +278,12 @@ public sealed partial class ControlCardViewModel : ObservableObject
         ControlAcquireFailure.AlreadyOwned => "something else is holding it.",
         ControlAcquireFailure.EngineUnavailable => "the engine is in a failsafe state.",
         ControlAcquireFailure.UnknownControl => "the engine no longer sees this control.",
+
+        // Says what to do about it. This refusal exists precisely so that switching a fan off and
+        // then wondering why the slider does nothing stops being a silent failure, and answering it
+        // with "the engine refused" would give back the silence in a different font.
+        ControlAcquireFailure.NotDriven => "Impeller is not driving it — switch the fan on first.",
+        ControlAcquireFailure.NotPermitted => "it has not been granted to this program.",
         _ => "the engine refused.",
     };
 }

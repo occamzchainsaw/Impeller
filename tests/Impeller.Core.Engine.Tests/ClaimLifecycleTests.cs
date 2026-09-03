@@ -1,0 +1,421 @@
+﻿using Impeller.Core.Abstractions;
+using Impeller.Core.Engine.Curves;
+
+namespace Impeller.Core.Engine.Tests;
+
+/// <summary>
+/// Covers what happens when a control changes hands, and which controls can be claimed at all.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Three defects, all in shipped code, all found while planning the plugin channel. A requested
+/// duty was written and never removed, so a control acquired by someone new opened at the previous
+/// holder's duty. The tick loop skips a disabled binding before it resolves ownership, so a claim
+/// on one was granted, its duties accepted, and every one of them discarded without a word. And the
+/// claimant check on a duty applied only to plugin-held controls, so anyone could set the duty on a
+/// fan the user had pinned by hand.
+/// </para>
+/// <para>
+/// They matter more together than apart: a plugin's acquire and its first duty are two round trips
+/// with ticks in between, and disabling a fan so that two programs "do not fight" is exactly what a
+/// careful user does.
+/// </para>
+/// </remarks>
+public class ClaimLifecycleTests
+{
+    private static readonly TimeSpan Tick = TimeSpan.FromSeconds(1);
+
+    private const string PluginA = "com.example.a";
+    private const string PluginB = "com.example.b";
+
+    /// <summary>A single fan on a flat 50% curve, with ramp limiting off.</summary>
+    private sealed class Harness
+    {
+        public FakeSensorRegistry Registry { get; } = new();
+
+        public ControlOwnershipRegistry Ownership { get; } = new(TimeProvider.System);
+
+        public FakeControl Fan { get; }
+
+        public ControlLoop Loop { get; }
+
+        public FlatCurve Curve { get; }
+
+        public List<ControlOwnershipChange> Changes { get; } = [];
+
+        public Harness()
+        {
+            Fan = Registry.Add(new FakeControl());
+            Curve = new FlatCurve(CurveId.New(), "rest", new Duty(50f));
+            Loop = new ControlLoop(Registry, Ownership, TimeProvider.System);
+
+            Ownership.OwnershipChanged += (_, change) => Changes.Add(change);
+
+            Configure();
+        }
+
+        public SensorId FanId => Fan.Id;
+
+        /// <summary>Applies a binding, defaulting to one a plugin is allowed to hold.</summary>
+        public void Configure(bool enabled = true, bool withCurve = true) =>
+            Loop.Configure(
+                [Curve],
+                [
+                    new ControlBinding(Fan.Id)
+                    {
+                        CurveId = withCurve ? Curve.Id : CurveId.None,
+                        Enabled = enabled,
+                        MaximumStepUpPerSecond = 0f,
+                        MaximumStepDownPerSecond = 0f,
+                    },
+                ]);
+
+        public float Commanded => Loop.GetCommandedDuty(Fan.Id)!.Value.Percent;
+
+        /// <summary>The reason the last ownership change gave.</summary>
+        public OwnershipChangeReason LastReason => Changes[^1].Reason;
+    }
+
+    [Fact]
+    public void A_control_taken_by_someone_new_does_not_open_at_the_previous_holders_duty()
+    {
+        // The defect. Without the fix the fan is at 80% the moment B acquires, before B has said
+        // anything at all - and it is attributed to B, which has no idea where the number came from.
+        var harness = new Harness();
+
+        Assert.True(harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, PluginA).Succeeded);
+        harness.Loop.TrySetRequestedDuty(harness.FanId, new Duty(80f), PluginA);
+        harness.Loop.Tick(Tick);
+        Assert.Equal(80f, harness.Commanded, precision: 3);
+
+        harness.Ownership.Release(harness.FanId, PluginA);
+        harness.Loop.Tick(Tick);
+        Assert.Equal(50f, harness.Commanded, precision: 3);
+
+        Assert.True(harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, PluginB).Succeeded);
+        harness.Loop.Tick(Tick);
+
+        Assert.Equal(50f, harness.Commanded, precision: 3);
+    }
+
+    [Fact]
+    public void A_control_taken_straight_from_one_holder_by_another_does_not_carry_the_duty_across()
+    {
+        // No trip through the curve in between, which is the case a cleanup on release would miss
+        // if it only ran when a control went back to resting.
+        var harness = new Harness();
+
+        harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, PluginA);
+        harness.Loop.TrySetRequestedDuty(harness.FanId, new Duty(80f), PluginA);
+        harness.Loop.Tick(Tick);
+
+        harness.Ownership.ForceRelease(harness.FanId, OwnershipChangeReason.Revoked);
+        harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, PluginB);
+        harness.Loop.Tick(Tick);
+
+        Assert.Equal(50f, harness.Commanded, precision: 3);
+    }
+
+    [Fact]
+    public void A_plugin_that_reconnects_does_not_inherit_the_duty_it_had_before_it_died()
+    {
+        // The case the stamp alone cannot catch, because the claimant id is the same on both sides
+        // of the death. A claim is a session fact; the duty it was holding does not outlive it.
+        var harness = new Harness();
+
+        harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, PluginA);
+        harness.Loop.TrySetRequestedDuty(harness.FanId, new Duty(80f), PluginA);
+        harness.Loop.Tick(Tick);
+
+        // The process dies: the host force-releases everything it held.
+        harness.Ownership.ForceReleaseAllFrom(PluginA, OwnershipChangeReason.Unhealthy);
+        harness.Loop.Tick(Tick);
+        Assert.Equal(50f, harness.Commanded, precision: 3);
+
+        harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, PluginA);
+        harness.Loop.Tick(Tick);
+
+        Assert.Equal(50f, harness.Commanded, precision: 3);
+    }
+
+    [Fact]
+    public void A_fan_a_plugin_was_driving_is_back_on_its_curve_the_tick_after_the_plugin_goes_away()
+    {
+        var harness = new Harness();
+
+        harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, PluginA);
+        harness.Loop.TrySetRequestedDuty(harness.FanId, new Duty(90f), PluginA);
+        harness.Loop.Tick(Tick);
+
+        Assert.Equal(1, harness.Ownership.ForceReleaseAllFrom(PluginA, OwnershipChangeReason.Unhealthy));
+        harness.Loop.Tick(Tick);
+
+        Assert.Equal(50f, harness.Commanded, precision: 3);
+    }
+
+    [Fact]
+    public void A_duty_from_a_claimant_that_no_longer_holds_the_control_is_not_written()
+    {
+        // Belt to the cleanup's braces: even with the entry still present, it is unreadable once
+        // the control has changed hands.
+        var harness = new Harness();
+
+        harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.ManualOverride, ControlOwnershipRegistry.ManualClaimant);
+        harness.Loop.TrySetRequestedDuty(
+            harness.FanId, new Duty(20f), ControlOwnershipRegistry.ManualClaimant);
+        harness.Loop.Tick(Tick);
+        Assert.Equal(20f, harness.Commanded, precision: 3);
+
+        // A plugin cannot write while the user holds it, and cannot benefit from what the user wrote.
+        Assert.False(harness.Loop.TrySetRequestedDuty(harness.FanId, new Duty(99f), PluginA));
+
+        harness.Ownership.ForceRelease(harness.FanId, OwnershipChangeReason.Revoked);
+        harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, PluginA);
+        harness.Loop.Tick(Tick);
+
+        Assert.Equal(50f, harness.Commanded, precision: 3);
+    }
+
+    [Fact]
+    public void A_plugin_cannot_set_the_duty_on_a_fan_the_user_pinned_by_hand()
+    {
+        // The claimant check used to run only when a plugin held the control, so a request naming a
+        // different claimant was accepted on a user-held one and stored against the owner - which
+        // made it indistinguishable from something the user had asked for. Exclusive ownership is
+        // the invariant the whole arbitration model rests on, and this was a hole straight through
+        // it in the direction nobody was looking.
+        var harness = new Harness();
+
+        harness.Loop.TryAcquire(
+            harness.FanId, ControlOwnerKind.ManualOverride, ControlOwnershipRegistry.ManualClaimant);
+        harness.Loop.TrySetRequestedDuty(
+            harness.FanId, new Duty(20f), ControlOwnershipRegistry.ManualClaimant);
+
+        Assert.False(harness.Loop.TrySetRequestedDuty(harness.FanId, new Duty(99f), PluginA));
+
+        harness.Loop.Tick(Tick);
+        Assert.Equal(20f, harness.Commanded, precision: 3);
+    }
+
+    [Fact]
+    public void An_unnamed_caller_cannot_set_the_duty_on_a_control_someone_holds()
+    {
+        var harness = new Harness();
+        harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, PluginA);
+
+        Assert.False(harness.Loop.TrySetRequestedDuty(harness.FanId, new Duty(99f)));
+    }
+
+    [Fact]
+    public void A_claimant_that_has_not_said_anything_yet_leaves_the_fan_on_its_curve()
+    {
+        // Not a hold at whatever was last on the fan. A claimant takes a control before it has
+        // computed a duty, and for the gap in between the curve is the only answer that is anyone's
+        // actual intent.
+        var harness = new Harness();
+        harness.Loop.Tick(Tick);
+
+        harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, PluginA);
+        harness.Loop.Tick(Tick);
+
+        Assert.Equal(50f, harness.Commanded, precision: 3);
+    }
+
+    [Fact]
+    public void A_control_with_nothing_behind_it_holds_rather_than_guessing()
+    {
+        // The other half of the rule. With no curve there is no better answer sitting behind the
+        // silence, and moving a fan to a number nobody chose is worse than leaving it alone.
+        var harness = new Harness();
+        harness.Configure(withCurve: false);
+
+        harness.Loop.TryAcquire(
+            harness.FanId, ControlOwnerKind.ManualOverride, ControlOwnershipRegistry.ManualClaimant);
+        harness.Loop.TrySetRequestedDuty(
+            harness.FanId, new Duty(35f), ControlOwnershipRegistry.ManualClaimant);
+        harness.Loop.Tick(Tick);
+        Assert.Equal(35f, harness.Commanded, precision: 3);
+
+        harness.Ownership.ForceRelease(harness.FanId, OwnershipChangeReason.Revoked);
+        harness.Loop.Tick(Tick);
+
+        Assert.Equal(35f, harness.Commanded, precision: 3);
+    }
+
+    [Fact]
+    public void A_plugin_cannot_claim_a_control_the_engine_is_not_driving()
+    {
+        // The refusal that had no caller until now. Granting this would mean a plugin whose every
+        // write is accepted and discarded, with nothing anywhere saying so.
+        var harness = new Harness();
+        harness.Configure(enabled: false);
+
+        var result = harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, PluginA);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(ControlAcquireFailure.NotDriven, result.Failure);
+        Assert.Equal(ControlOwnerKind.Curve, harness.Ownership.GetOwner(harness.FanId).Kind);
+    }
+
+    [Fact]
+    public void A_plugin_cannot_claim_a_control_with_no_curve_to_fall_back_to()
+    {
+        // The curve is what the fan returns to when the plugin lets go or dies. Without one the
+        // plugin is the only thing between the fan and a stopped fan, and its process dying becomes
+        // a cooling failure rather than a fan going back to what it was doing.
+        var harness = new Harness();
+        harness.Configure(withCurve: false);
+
+        var result = harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, PluginA);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(ControlAcquireFailure.NotDriven, result.Failure);
+    }
+
+    [Fact]
+    public void A_person_may_still_pin_a_control_that_has_no_curve()
+    {
+        // The weaker rule, on purpose. A pin is written into the configuration and restored on the
+        // next start, so a permanent pin with no curve is a configuration the engine supports and a
+        // user reasonably wants. Holding a person to the plugin rule would break it.
+        var harness = new Harness();
+        harness.Configure(withCurve: false);
+
+        var result = harness.Loop.TryAcquire(
+            harness.FanId, ControlOwnerKind.ManualOverride, ControlOwnershipRegistry.ManualClaimant);
+
+        Assert.True(result.Succeeded);
+    }
+
+    [Fact]
+    public void Nobody_may_pin_a_control_the_engine_has_been_told_to_leave_alone()
+    {
+        // The same trap as the plugin one and the one a user hits far more often: pinning a
+        // disabled fan used to be accepted, saved to the configuration, and never written.
+        var harness = new Harness();
+        harness.Configure(enabled: false);
+
+        var result = harness.Loop.TryAcquire(
+            harness.FanId, ControlOwnerKind.ManualOverride, ControlOwnershipRegistry.ManualClaimant);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(ControlAcquireFailure.NotDriven, result.Failure);
+    }
+
+    [Fact]
+    public void A_claim_on_a_control_that_is_not_in_the_configuration_at_all_is_refused()
+    {
+        var harness = new Harness();
+
+        var result = harness.Loop.TryAcquire(SensorId.New(), ControlOwnerKind.Plugin, PluginA);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(ControlAcquireFailure.UnknownControl, result.Failure);
+    }
+
+    [Fact]
+    public void A_failsafe_claim_is_taken_regardless_of_what_the_configuration_says()
+    {
+        // The failsafe runs when the engine has lost its grip. A configuration that would refuse it
+        // a control is exactly the configuration whose fans most need driving to safety.
+        var harness = new Harness();
+        harness.Configure(enabled: false, withCurve: false);
+
+        Assert.True(harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Failsafe).Succeeded);
+    }
+
+    [Fact]
+    public void A_plugin_holding_a_fan_that_a_new_configuration_disables_is_taken_off_it_and_told()
+    {
+        // The grant is checked when the claim is taken, but a user can disable the fan a minute
+        // later. Leaving the claim in place would put the plugin back in the silent-discard state
+        // that refusing the claim exists to prevent.
+        var harness = new Harness();
+        harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, PluginA);
+        harness.Loop.TrySetRequestedDuty(harness.FanId, new Duty(80f), PluginA);
+
+        harness.Configure(enabled: false);
+
+        Assert.Equal(ControlOwnerKind.Curve, harness.Ownership.GetOwner(harness.FanId).Kind);
+        Assert.Equal(OwnershipChangeReason.ConfigurationChanged, harness.LastReason);
+    }
+
+    [Fact]
+    public void A_plugin_holding_a_fan_whose_curve_is_taken_away_is_taken_off_it_too()
+    {
+        var harness = new Harness();
+        harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, PluginA);
+
+        harness.Configure(withCurve: false);
+
+        Assert.Equal(ControlOwnerKind.Curve, harness.Ownership.GetOwner(harness.FanId).Kind);
+        Assert.Equal(OwnershipChangeReason.ConfigurationChanged, harness.LastReason);
+    }
+
+    [Fact]
+    public void A_plugin_keeps_a_fan_a_new_configuration_still_lets_it_hold()
+    {
+        // Reconfiguring for an unrelated reason must not evict every plugin in the machine.
+        var harness = new Harness();
+        harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, PluginA);
+        harness.Loop.TrySetRequestedDuty(harness.FanId, new Duty(80f), PluginA);
+
+        harness.Configure();
+        harness.Loop.Tick(Tick);
+
+        Assert.Equal(ControlOwnerKind.Plugin, harness.Ownership.GetOwner(harness.FanId).Kind);
+        Assert.Equal(80f, harness.Commanded, precision: 3);
+    }
+
+    [Fact]
+    public void A_failsafe_claim_survives_a_configuration_change_that_would_evict_a_plugin()
+    {
+        var harness = new Harness();
+        harness.Loop.EngageFailsafe();
+        harness.Loop.ClearFailsafe();
+
+        // Re-take it directly: what matters is that a Failsafe holder is not swept.
+        harness.Ownership.TryAcquire(harness.FanId, ControlOwnerKind.Failsafe);
+        harness.Configure(enabled: false, withCurve: false);
+
+        Assert.Equal(ControlOwnerKind.Failsafe, harness.Ownership.GetOwner(harness.FanId).Kind);
+    }
+
+    [Fact]
+    public void Taking_a_control_by_hand_says_so_rather_than_reporting_a_bare_claim()
+    {
+        // The reasons are what a plugin reacts to. The user taking a fan back is a normal thing to
+        // accept; a failsafe is a reason not to ask for it again on a timer.
+        var harness = new Harness();
+
+        harness.Loop.TryAcquire(
+            harness.FanId, ControlOwnerKind.ManualOverride, ControlOwnershipRegistry.ManualClaimant);
+
+        Assert.Equal(OwnershipChangeReason.TakenByUser, harness.LastReason);
+
+        harness.Loop.EngageFailsafe();
+        Assert.Equal(OwnershipChangeReason.Failsafe, harness.LastReason);
+    }
+
+    [Fact]
+    public void Releasing_a_control_says_it_was_released_rather_than_revoked()
+    {
+        var harness = new Harness();
+
+        harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, PluginA);
+        harness.Ownership.Release(harness.FanId, PluginA);
+
+        Assert.Equal(OwnershipChangeReason.Released, harness.LastReason);
+    }
+
+    [Fact]
+    public void A_forced_release_carries_the_reason_the_caller_gave_it()
+    {
+        var harness = new Harness();
+
+        harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, PluginA);
+        harness.Ownership.ForceRelease(harness.FanId, OwnershipChangeReason.LeaseExpired);
+
+        Assert.Equal(OwnershipChangeReason.LeaseExpired, harness.LastReason);
+    }
+}

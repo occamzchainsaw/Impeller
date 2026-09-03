@@ -1,4 +1,4 @@
-using Impeller.Core.Abstractions;
+﻿using Impeller.Core.Abstractions;
 
 namespace Impeller.Core.Engine;
 
@@ -95,7 +95,17 @@ public sealed class ControlOwnershipRegistry(TimeProvider timeProvider)
 
             var owner = new ControlOwner(kind, claimantId, _time.GetUtcNow());
             _owners[controlId] = owner;
-            Raise(controlId, current, owner);
+
+            // The reason follows from the kind rather than being passed in: there is exactly one
+            // way to become each sort of owner, and a caller free to name its own reason is a
+            // caller free to name the wrong one.
+            Raise(controlId, current, owner, kind switch
+            {
+                ControlOwnerKind.Failsafe => OwnershipChangeReason.Failsafe,
+                ControlOwnerKind.ManualOverride => OwnershipChangeReason.TakenByUser,
+                _ => OwnershipChangeReason.Claimed,
+            });
+
             return ControlAcquireResult.Granted();
         }
     }
@@ -124,7 +134,7 @@ public sealed class ControlOwnershipRegistry(TimeProvider timeProvider)
                 return false;
             }
 
-            return ReleaseLocked(controlId, current);
+            return ReleaseLocked(controlId, current, OwnershipChangeReason.Released);
         }
     }
 
@@ -136,11 +146,17 @@ public sealed class ControlOwnershipRegistry(TimeProvider timeProvider)
     /// engine when recovering from a failsafe. A hung plugin must not be able to strand a fan
     /// simply by never releasing it.
     /// </remarks>
-    public bool ForceRelease(SensorId controlId)
+    /// <param name="controlId">The control to free.</param>
+    /// <param name="reason">
+    /// Why it is being taken. Named by the caller here, unlike an acquire: only the caller knows
+    /// whether this is a revoked permission, an expired lease or a plugin that stopped answering,
+    /// and the difference is the whole value of telling the claimant at all.
+    /// </param>
+    public bool ForceRelease(SensorId controlId, OwnershipChangeReason reason = OwnershipChangeReason.Revoked)
     {
         lock (_gate)
         {
-            return ReleaseLocked(controlId, GetOwnerLocked(controlId));
+            return ReleaseLocked(controlId, GetOwnerLocked(controlId), reason);
         }
     }
 
@@ -148,7 +164,9 @@ public sealed class ControlOwnershipRegistry(TimeProvider timeProvider)
     /// Releases every control held by one claimant, returning how many were freed.
     /// Called when a plugin is unloaded, disabled, or found unhealthy.
     /// </summary>
-    public int ForceReleaseAllFrom(string claimantId)
+    public int ForceReleaseAllFrom(
+        string claimantId,
+        OwnershipChangeReason reason = OwnershipChangeReason.Revoked)
     {
         ArgumentNullException.ThrowIfNull(claimantId);
 
@@ -162,7 +180,7 @@ public sealed class ControlOwnershipRegistry(TimeProvider timeProvider)
 
             foreach (var controlId in held)
             {
-                ReleaseLocked(controlId, _owners[controlId]);
+                ReleaseLocked(controlId, _owners[controlId], reason);
             }
 
             return held.Length;
@@ -207,7 +225,7 @@ public sealed class ControlOwnershipRegistry(TimeProvider timeProvider)
     private ControlOwner GetOwnerLocked(SensorId controlId) =>
         _owners.TryGetValue(controlId, out var owner) ? owner : ControlOwner.ByCurve(_time);
 
-    private bool ReleaseLocked(SensorId controlId, ControlOwner current)
+    private bool ReleaseLocked(SensorId controlId, ControlOwner current, OwnershipChangeReason reason)
     {
         if (current.IsCurve)
         {
@@ -216,19 +234,31 @@ public sealed class ControlOwnershipRegistry(TimeProvider timeProvider)
 
         var owner = ControlOwner.ByCurve(_time);
         _owners[controlId] = owner;
-        Raise(controlId, current, owner);
+        Raise(controlId, current, owner, reason);
         return true;
     }
 
-    private void Raise(SensorId controlId, ControlOwner previous, ControlOwner current) =>
-        OwnershipChanged?.Invoke(this, new ControlOwnershipChange(controlId, previous, current));
+    private void Raise(
+        SensorId controlId,
+        ControlOwner previous,
+        ControlOwner current,
+        OwnershipChangeReason reason) =>
+        OwnershipChanged?.Invoke(this, new ControlOwnershipChange(controlId, previous, current, reason));
 }
 
 /// <summary>Describes a change of control ownership.</summary>
 /// <param name="ControlId">The control whose owner changed.</param>
 /// <param name="Previous">Who held it before.</param>
 /// <param name="Current">Who holds it now.</param>
+/// <param name="Reason">Why it changed hands.</param>
+/// <remarks>
+/// The reason is here rather than left to be inferred from the two owners, because it cannot be
+/// inferred: a plugin losing a control to the curve looks identical whether the user revoked it,
+/// its lease expired, or the configuration stopped driving that fan — and a claimant needs to
+/// behave differently in each case.
+/// </remarks>
 public sealed record ControlOwnershipChange(
     SensorId ControlId,
     ControlOwner Previous,
-    ControlOwner Current);
+    ControlOwner Current,
+    OwnershipChangeReason Reason);

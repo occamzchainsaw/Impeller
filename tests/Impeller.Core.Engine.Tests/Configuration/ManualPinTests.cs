@@ -1,4 +1,4 @@
-using Impeller.Core.Abstractions;
+﻿using Impeller.Core.Abstractions;
 using Impeller.Core.Abstractions.Configuration;
 using Impeller.Core.Engine.Configuration;
 using Impeller.Core.Persistence;
@@ -25,9 +25,14 @@ public class ManualPinTests : IDisposable
     // One control id for the life of the test, so a second engine over the same store resolves the
     // same fan the first one pinned.
     private readonly SensorId _controlId;
+    private readonly SensorId _sensorId;
     private readonly FakeSensorRegistry _shared = new();
 
-    public ManualPinTests() => _controlId = _shared.Add(new FakeControl()).Id;
+    public ManualPinTests()
+    {
+        _controlId = _shared.Add(new FakeControl()).Id;
+        _sensorId = _shared.Add(new FakeSensor { Value = 40f }).Id;
+    }
 
     public void Dispose()
     {
@@ -61,6 +66,44 @@ public class ManualPinTests : IDisposable
         Controls = [new ControlBindingDefinition
         {
             ControlId = _controlId,
+            Enabled = true,
+            ManualDuty = pin,
+        }],
+    };
+
+    private static readonly CurveId Fallback = CurveId.New();
+
+    /// <summary>
+    /// The same configuration with a curve behind the pin.
+    /// </summary>
+    /// <remarks>
+    /// A pin with no curve is a supported configuration for a person: the pin is written to disk and
+    /// restored on the next start, so there is always something to fall back to. It is not one for a
+    /// plugin, whose claim exists only for as long as its process does. Tests about plugin claims
+    /// therefore have to say what the fan falls back to, or they exercise the curveless rule by
+    /// accident.
+    /// </remarks>
+    private ImpellerConfiguration PinnedOverCurve(Duty? pin) => new()
+    {
+        Name = "Pins",
+        Curves =
+        [
+            new GraphCurveDefinition
+            {
+                Id = Fallback,
+                Name = "Fallback",
+                Source = _sensorId,
+                Points =
+                [
+                    new CurvePointDefinition(20f, new Duty(10f)),
+                    new CurvePointDefinition(80f, new Duty(100f)),
+                ],
+            },
+        ],
+        Controls = [new ControlBindingDefinition
+        {
+            ControlId = _controlId,
+            CurveId = Fallback,
             Enabled = true,
             ManualDuty = pin,
         }],
@@ -147,11 +190,12 @@ public class ManualPinTests : IDisposable
     public void A_control_a_plugin_is_holding_is_not_taken_from_it_by_a_stored_pin()
     {
         var (coordinator, loop, ownership) = Engine();
+        coordinator.Apply(PinnedOverCurve(null));
 
         ownership.TryAcquire(_controlId, ControlOwnerKind.Plugin, "plugin.test");
         loop.TrySetRequestedDuty(_controlId, new Duty(20f), "plugin.test");
 
-        coordinator.Apply(Pinned(new Duty(90f)));
+        coordinator.Apply(PinnedOverCurve(new Duty(90f)));
 
         // A live claim outranks a stored one. The alternative is a configuration reload silently
         // seizing a fan from whatever was part-way through doing something with it.

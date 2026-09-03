@@ -54,6 +54,59 @@ public readonly record struct ControlOwner(
     public bool IsAvailableForClaim => Kind == ControlOwnerKind.Curve;
 }
 
+/// <summary>
+/// Why a control changed hands.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Carried on the ownership-changed event so a claimant that has just lost a control can tell the
+/// cases apart. They are not interchangeable: the user taking a fan back by hand is a normal thing
+/// to accept, a revoked permission is a reason to stop asking, and a failsafe is a reason not to
+/// re-acquire on a timer — the engine is in trouble and the fan is where it should be.
+/// </para>
+/// <para>
+/// Deliberately close to the plugin channel's own vocabulary, so the host translates one to the
+/// other without deciding anything.
+/// </para>
+/// </remarks>
+public enum OwnershipChangeReason
+{
+    /// <summary>A claimant took it.</summary>
+    Claimed = 0,
+
+    /// <summary>Its holder gave it up.</summary>
+    Released,
+
+    /// <summary>The engine's failsafe took it, outranking whoever held it.</summary>
+    Failsafe,
+
+    /// <summary>The user took it by hand.</summary>
+    TakenByUser,
+
+    /// <summary>
+    /// It stopped being a control the engine drives, so nobody can hold it.
+    /// </summary>
+    /// <remarks>
+    /// A grant is checked when a claim is taken, but the configuration can change under a standing
+    /// claim at any time afterwards. Rather than leave a claimant holding a control the engine has
+    /// stopped writing — where its duties would be accepted and silently discarded — the claim is
+    /// dropped and the claimant told.
+    /// </remarks>
+    ConfigurationChanged,
+
+    /// <summary>Its holder went quiet for longer than the lease it asked for.</summary>
+    LeaseExpired,
+
+    /// <summary>Permission to hold it was withdrawn.</summary>
+    Revoked,
+
+    /// <summary>The plugin holding it was disabled.</summary>
+    PluginDisabled,
+
+    /// <summary>Its holder stopped answering.</summary>
+    Unhealthy,
+}
+
 /// <summary>Why an attempt to acquire a control did not succeed.</summary>
 public enum ControlAcquireFailure
 {

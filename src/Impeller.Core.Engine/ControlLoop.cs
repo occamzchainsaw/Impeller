@@ -1,4 +1,4 @@
-using Impeller.Core.Abstractions;
+﻿using Impeller.Core.Abstractions;
 
 namespace Impeller.Core.Engine;
 
@@ -24,8 +24,10 @@ public readonly record struct TickResult(
 /// them pure functions of their inputs.
 /// </para>
 /// <para>
-/// A control whose owner produces no value holds its previous duty rather than falling back to
-/// a default. Guessing at a fan speed is worse than briefly not changing one.
+/// A control whose owner has nothing to say falls back to its curve, which is the same promise
+/// made to a fan whose plugin dies. A control whose curve produces no value holds its previous
+/// duty instead: guessing at a fan speed is worse than briefly not changing one, and unlike a
+/// silent owner a failed curve has no better answer sitting behind it.
 /// </para>
 /// <para>
 /// Not thread-safe by itself; <see cref="Tick"/> is expected to run on a single scheduler thread.
@@ -33,17 +35,31 @@ public readonly record struct TickResult(
 /// the thread-safe <see cref="ControlOwnershipRegistry"/> and an internal lock on requested duties.
 /// </para>
 /// </remarks>
-public sealed class ControlLoop(
-    ISensorRegistry registry,
-    ControlOwnershipRegistry ownership,
-    TimeProvider timeProvider)
+public sealed class ControlLoop
 {
-    private readonly ISensorRegistry _registry = registry;
-    private readonly ControlOwnershipRegistry _ownership = ownership;
-    private readonly TimeProvider _time = timeProvider;
+    private readonly ISensorRegistry _registry;
+    private readonly ControlOwnershipRegistry _ownership;
+    private readonly TimeProvider _time;
+
+    /// <summary>Builds a loop over a set of hardware and the registry arbitrating it.</summary>
+    public ControlLoop(
+        ISensorRegistry registry,
+        ControlOwnershipRegistry ownership,
+        TimeProvider timeProvider)
+    {
+        ArgumentNullException.ThrowIfNull(ownership);
+
+        _registry = registry;
+        _ownership = ownership;
+        _time = timeProvider;
+
+        // Nothing consumed this event before. See ForgetRequestedDuty for what it is for and why
+        // the stamp on a requested duty is not enough on its own.
+        _ownership.OwnershipChanged += (_, change) => ForgetRequestedDuty(change.ControlId);
+    }
 
     private readonly Lock _requestGate = new();
-    private readonly Dictionary<SensorId, Duty> _requestedDuties = [];
+    private readonly Dictionary<SensorId, RequestedDuty> _requestedDuties = [];
     private readonly Dictionary<SensorId, Duty> _commandedDuties = [];
 
     private IReadOnlyList<IFanCurve> _orderedCurves = [];
@@ -96,7 +112,47 @@ public sealed class ControlLoop(
         _bindings = bound;
         _startStop = bound.ToDictionary(entry => entry.Key, entry => new StartStopGate(entry.Value));
 
+        DropClaimsTheConfigurationNoLongerSupports();
         RestoreManualPins(bound.Values);
+    }
+
+    /// <summary>
+    /// Frees any control that is still held but is no longer one this configuration lets a
+    /// claimant hold.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Claimability is checked when a claim is taken, but the configuration can change under a
+    /// standing claim at any time afterwards - someone disables the fan, or unassigns its curve.
+    /// Without this the claim survives into a configuration that cannot honour it: the tick loop
+    /// skips a disabled binding, so the holder goes on setting duties that are accepted and then
+    /// silently discarded, while its own display shows a fan speed nobody is commanding.
+    /// </para>
+    /// <para>
+    /// The claimant is told, through the ownership event, with
+    /// <see cref="OwnershipChangeReason.ConfigurationChanged"/>. Being taken off a fan is
+    /// recoverable; not being told is not.
+    /// </para>
+    /// </remarks>
+    private void DropClaimsTheConfigurationNoLongerSupports()
+    {
+        foreach (var (controlId, owner) in _ownership.ActiveClaims)
+        {
+            var stillAllowed = owner.Kind switch
+            {
+                ControlOwnerKind.Plugin => CanBeHeldByPlugin(controlId),
+                ControlOwnerKind.ManualOverride => IsDriven(controlId),
+
+                // A failsafe claim outranks the configuration entirely. Freeing a fan the engine is
+                // holding because it lost its grip would be the one change that makes things worse.
+                _ => true,
+            };
+
+            if (!stillAllowed)
+            {
+                _ownership.ForceRelease(controlId, OwnershipChangeReason.ConfigurationChanged);
+            }
+        }
     }
 
     /// <summary>
@@ -113,7 +169,10 @@ public sealed class ControlLoop(
         {
             var owner = _ownership.GetOwner(binding.ControlId);
 
-            if (binding.ManualDuty is { } pinned)
+            // A stored pin on a disabled control is kept in the configuration but not taken: the
+            // tick loop would not write it, and a claim nothing honours is worse than no claim.
+            // Re-enabling the control restores the pin on the next apply.
+            if (binding.ManualDuty is { } pinned && binding.Enabled)
             {
                 // Anything already holding it stays: a plugin mid-claim, or a failsafe that has not
                 // cleared, both outrank a stored value.
@@ -152,18 +211,106 @@ public sealed class ControlLoop(
             return false;
         }
 
-        if (owner.Kind == ControlOwnerKind.Plugin
-            && !string.Equals(owner.ClaimantId, claimantId, StringComparison.Ordinal))
+        // Checked for every kind of owner, not just a plugin one. It used to apply only to
+        // plugin-held controls, which left a hole in the other direction: a plugin could set the
+        // duty on a fan the user had pinned by hand, and the request would be accepted and driven
+        // because it was stored against whoever legitimately owned the control. Nothing reached it
+        // before the plugin channel existed, which is why it survived this long.
+        if (!string.Equals(owner.ClaimantId, claimantId, StringComparison.Ordinal))
         {
             return false;
         }
 
         lock (_requestGate)
         {
-            _requestedDuties[controlId] = duty;
+            // Stamped with the owner it was validated against, not just stored. See RequestedDuty.
+            _requestedDuties[controlId] = new RequestedDuty(duty, owner.Kind, owner.ClaimantId);
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Whether the engine writes this control at all: it is bound by the current configuration and
+    /// enabled in it.
+    /// </summary>
+    public bool IsDriven(SensorId controlId) =>
+        _bindings.TryGetValue(controlId, out var binding) && binding.Enabled;
+
+    /// <summary>
+    /// Whether a plugin may hold this control: the engine drives it, and it has a curve to fall
+    /// back to when the plugin lets go or dies.
+    /// </summary>
+    /// <remarks>
+    /// The curve requirement is what makes a plugin claim safe to lose. Without one there is no
+    /// state to return to, and the plugin would be the only thing standing between the fan and a
+    /// stopped fan - so a process dying would be a cooling failure rather than a fan going back to
+    /// its curve. A manual pin is held to the weaker rule on purpose: it is written into the
+    /// configuration and restored on the next start, so a permanent pin with no curve is a
+    /// configuration the engine supports and a user reasonably wants.
+    /// </remarks>
+    public bool CanBeHeldByPlugin(SensorId controlId) =>
+        _bindings.TryGetValue(controlId, out var binding) && binding.Enabled && !binding.CurveId.IsNone;
+
+    /// <summary>
+    /// Takes a control on a claimant's behalf, refusing when this configuration cannot honour it.
+    /// </summary>
+    /// <remarks>
+    /// The one place that decides whether a control can be claimed, and it is the same class that
+    /// decides whether to write it - which is the point. The ownership registry knows who holds what
+    /// and nothing about configuration, so a claim routed straight to it succeeds on a control the
+    /// tick loop skips: granted, duties accepted, every one of them discarded without a word. The
+    /// trap is that disabling a fan is exactly what a careful user does so that two programs do not
+    /// fight over it.
+    /// </remarks>
+    /// <param name="controlId">The control to claim.</param>
+    /// <param name="kind">What sort of claimant this is.</param>
+    /// <param name="claimantId">Which specific claimant.</param>
+    public ControlAcquireResult TryAcquire(SensorId controlId, ControlOwnerKind kind, string? claimantId = null)
+    {
+        if (_registry.GetControl(controlId) is null)
+        {
+            return ControlAcquireResult.Refused(ControlAcquireFailure.UnknownControl);
+        }
+
+        var claimable = kind switch
+        {
+            ControlOwnerKind.Plugin => CanBeHeldByPlugin(controlId),
+            ControlOwnerKind.ManualOverride => IsDriven(controlId),
+            _ => true,
+        };
+
+        if (!claimable)
+        {
+            return ControlAcquireResult.Refused(ControlAcquireFailure.NotDriven);
+        }
+
+        return _ownership.TryAcquire(controlId, kind, claimantId);
+    }
+
+    /// <summary>
+    /// Drops whatever duty was last asked for on a control, because it changed hands.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The second half of the fix for a control inheriting a previous holder's duty, and it covers
+    /// a case the stamp cannot: the same claimant taking the same control twice. A plugin whose
+    /// process died, or that released and re-acquired, would otherwise find its own last duty
+    /// waiting for it - stamped with its own name, so indistinguishable from something it had just
+    /// asked for. A claim is a session fact and does not survive the session that made it.
+    /// </para>
+    /// <para>
+    /// Cleanup, not the invariant. The stamp is what makes a stale entry unreadable even if this
+    /// never ran; this is what stops one existing in the first place. Neither alone is enough,
+    /// which is why both are here.
+    /// </para>
+    /// </remarks>
+    private void ForgetRequestedDuty(SensorId controlId)
+    {
+        lock (_requestGate)
+        {
+            _requestedDuties.Remove(controlId);
+        }
     }
 
     /// <summary>The duty most recently written to a control, or null if it has not been written.</summary>
@@ -238,7 +385,7 @@ public sealed class ControlLoop(
         {
             if (_ownership.GetOwner(controlId).Kind == ControlOwnerKind.Failsafe)
             {
-                _ownership.ForceRelease(controlId);
+                _ownership.ForceRelease(controlId, OwnershipChangeReason.Released);
             }
         }
 
@@ -271,6 +418,10 @@ public sealed class ControlLoop(
 
         foreach (var binding in _bindings.Values)
         {
+            // Ahead of ownership resolution, which is only safe because nothing can hold a control
+            // this skips: TryAcquire refuses a claim on one, and a configuration change that
+            // invalidates a standing claim drops it. Without both of those, this line silently
+            // discards the duties of whoever owns the control.
             if (!binding.Enabled || _registry.GetControl(binding.ControlId) is not { } control)
             {
                 continue;
@@ -371,14 +522,53 @@ public sealed class ControlLoop(
             case ControlOwnerKind.ManualOverride:
                 lock (_requestGate)
                 {
-                    return _requestedDuties.TryGetValue(binding.ControlId, out var requested)
-                        ? requested
-                        : null;
+                    if (_requestedDuties.TryGetValue(binding.ControlId, out var requested)
+                        && requested.BelongsTo(owner))
+                    {
+                        return requested.Duty;
+                    }
                 }
+
+                // An owner that has not said anything yet falls to the curve rather than holding
+                // whatever the last owner left on the fan. A claimant takes a control before it has
+                // computed a duty - for a plugin those are two round trips with ticks in between -
+                // and the alternative is a fan sitting at a stranger's duty under a new owner's
+                // name. Falling back is the same promise made when a plugin dies: no owner with an
+                // opinion means the curve.
+                goto default;
 
             default:
                 return curveOutputs.TryGetValue(binding.CurveId, out var output) ? output : null;
         }
+    }
+
+    /// <summary>
+    /// A duty someone asked for, together with who they were when they asked.
+    /// </summary>
+    /// <param name="Duty">What was asked for.</param>
+    /// <param name="Kind">What sort of claimant asked.</param>
+    /// <param name="ClaimantId">Which specific claimant.</param>
+    /// <remarks>
+    /// <para>
+    /// The stamp is what stops a control inheriting the previous holder's duty. Entries used to be
+    /// written and never removed, so a claimant that acquired a control and did not immediately
+    /// write to it was handed whatever the last holder had asked for - at the next tick, under its
+    /// own name. The shell has always set a duty in the same breath as taking the claim, which is
+    /// why this has not bitten yet; a plugin's acquire and its first duty are two round trips with
+    /// ticks in between.
+    /// </para>
+    /// <para>
+    /// Checked on the way out rather than cleaned up on the way in, deliberately. Clearing entries
+    /// from the ownership-changed event would hold only for as long as every path that changes an
+    /// owner raises it, and the cost of missing one is a fan running at a stranger's duty. A stale
+    /// entry that can never be read is not a bug.
+    /// </para>
+    /// </remarks>
+    private readonly record struct RequestedDuty(Duty Duty, ControlOwnerKind Kind, string? ClaimantId)
+    {
+        /// <summary>Whether this request came from the party that holds the control now.</summary>
+        public bool BelongsTo(ControlOwner owner) =>
+            owner.Kind == Kind && string.Equals(owner.ClaimantId, ClaimantId, StringComparison.Ordinal);
     }
 
     /// <summary>

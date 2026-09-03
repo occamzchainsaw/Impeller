@@ -1,4 +1,4 @@
-using Impeller.Core.Abstractions;
+﻿using Impeller.Core.Abstractions;
 using Impeller.Core.Engine;
 using Impeller.Core.Engine.Configuration;
 using Impeller.Core.Engine.Sensors;
@@ -125,6 +125,7 @@ builder.Services.AddSingleton<ISensorProvider>(sp => sp.GetRequiredService<Custo
 // to answer "is this thing alive" without a reference to a hosted service.
 builder.Services.AddSingleton<EngineNotifications>();
 builder.Services.AddSingleton<EngineWorkerState>();
+builder.Services.AddSingleton<EngineReadiness>();
 builder.Services.AddSingleton<TuningCoordinator>();
 builder.Services.AddSingleton<EngineRpcService>();
 

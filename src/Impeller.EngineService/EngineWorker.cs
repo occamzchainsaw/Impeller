@@ -1,4 +1,4 @@
-using Impeller.Core.Abstractions;
+﻿using Impeller.Core.Abstractions;
 using Impeller.Core.Engine;
 using Impeller.Core.Engine.Configuration;
 using Impeller.Core.Persistence;
@@ -32,6 +32,7 @@ public sealed partial class EngineWorker(
     ConfigurationCoordinator configuration,
     EngineNotifications notifications,
     EngineWorkerState state,
+    EngineReadiness readiness,
     TimeProvider timeProvider,
     IOptions<EngineOptions> options,
     ILogger<EngineWorker> logger) : BackgroundService
@@ -301,6 +302,11 @@ public sealed partial class EngineWorker(
             // Shared so the RPC layer can read liveness without a reference to a hosted service.
             state.TickCount = TickCount;
             state.LastTickCompleted = now;
+
+            // Only now is the engine answering questions correctly: providers enumerated, sensor
+            // identities resolved, bindings live. Anything gated on this - the plugin channel -
+            // would otherwise open onto an engine that refuses every control it is asked about.
+            readiness.MarkReady();
 
             PublishTick(result, now);
         }

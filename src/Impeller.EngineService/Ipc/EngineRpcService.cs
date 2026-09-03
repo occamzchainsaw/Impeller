@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using Impeller.Core.Abstractions;
@@ -153,7 +153,11 @@ public sealed class EngineRpcService(
         // Already ours: adjusting a slider should not need the claim taken again.
         if (owner.Kind != ControlOwnerKind.ManualOverride)
         {
-            var acquired = ownership.TryAcquire(controlId, ControlOwnerKind.ManualOverride, ManualClaimant);
+            // Through the loop rather than straight to the ownership registry. The registry knows
+            // who holds what and nothing about configuration, so it would happily grant a claim on
+            // a control the tick loop skips - and the pin would then be accepted, saved, and never
+            // written to the fan.
+            var acquired = loop.TryAcquire(controlId, ControlOwnerKind.ManualOverride, ManualClaimant);
 
             if (!acquired.Succeeded)
             {
