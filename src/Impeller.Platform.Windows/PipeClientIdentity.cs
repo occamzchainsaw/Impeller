@@ -37,33 +37,39 @@ public sealed record ClientProcess(string? ImagePath, string? UserSid);
 public static partial class PipeClientIdentity
 {
     private const uint ProcessQueryLimitedInformation = 0x1000;
+    private const uint TokenQuery = 0x0008;
 
     /// <summary>Identifies the client of a connected server pipe.</summary>
     public static ClientProcess Identify(NamedPipeServerStream pipe)
     {
         ArgumentNullException.ThrowIfNull(pipe);
 
-        return new ClientProcess(ReadImagePath(pipe), ReadUserSid(pipe));
-    }
-
-    private static string? ReadImagePath(NamedPipeServerStream pipe)
-    {
         try
         {
             if (!GetNamedPipeClientProcessId(pipe.SafePipeHandle, out var processId))
             {
-                return null;
+                return new ClientProcess(null, null);
             }
 
-            // Limited information only: enough for the path, and not enough to read the process's
-            // memory. The engine runs as LocalSystem and should ask for the least it can.
+            // Limited information only: enough for the path and the account, and not enough to read
+            // the process's memory. The engine runs as LocalSystem and should ask for the least it
+            // can get away with.
             using var process = OpenProcess(ProcessQueryLimitedInformation, false, processId);
 
-            if (process.IsInvalid)
-            {
-                return null;
-            }
+            return process.IsInvalid
+                ? new ClientProcess(null, null)
+                : new ClientProcess(ReadImagePath(process), ReadUserSid(process));
+        }
+        catch (Exception ex) when (ex is EntryPointNotFoundException or DllNotFoundException or IOException)
+        {
+            return new ClientProcess(null, null);
+        }
+    }
 
+    private static string? ReadImagePath(SafeProcessHandle process)
+    {
+        try
+        {
             // A stack buffer and a pointer rather than a marshalled array: the source-generated
             // marshaller refuses char[] unless runtime marshalling is disabled assembly-wide, and
             // turning that off for the whole project to fill one buffer is the wrong trade.
@@ -83,34 +89,42 @@ public static partial class PipeClientIdentity
 
             return new string(buffer[..(int)length]);
         }
-        catch (Exception ex) when (ex is EntryPointNotFoundException or DllNotFoundException or IOException)
+        catch (Exception ex) when (ex is EntryPointNotFoundException or DllNotFoundException)
         {
             return null;
         }
     }
 
     /// <summary>
-    /// Reads the client's account by briefly impersonating it.
+    /// Reads the client's account from its process token.
     /// </summary>
     /// <remarks>
-    /// Impersonation rather than opening the client's token, because it needs no rights over the
-    /// client process at all: the pipe already carries the caller's identity, and this asks Windows
-    /// who that is. The impersonation lasts one property read.
+    /// From the token rather than by impersonating the pipe client, which is the obvious way and
+    /// the wrong one: <c>ImpersonateNamedPipeClient</c> only works when the <em>client</em> opened
+    /// its end asking for it, so every plugin not built with our own SDK would silently arrive with
+    /// no account at all - and an approval bound to a path but no user is half a binding that looks
+    /// like a whole one. Reading the token needs no cooperation from the plugin.
     /// </remarks>
-    private static string? ReadUserSid(NamedPipeServerStream pipe)
+    private static string? ReadUserSid(SafeProcessHandle process)
     {
-        string? sid = null;
-
         try
         {
-            pipe.RunAsClient(() => sid = WindowsIdentity.GetCurrent().User?.Value);
+            if (!OpenProcessToken(process, TokenQuery, out var token))
+            {
+                return null;
+            }
+
+            using (token)
+            {
+                using var identity = new WindowsIdentity(token.DangerousGetHandle());
+                return identity.User?.Value;
+            }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        catch (Exception ex) when (ex is EntryPointNotFoundException or DllNotFoundException
+            or UnauthorizedAccessException or ArgumentException or OutOfMemoryException)
         {
             return null;
         }
-
-        return sid;
     }
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
@@ -122,6 +136,13 @@ public static partial class PipeClientIdentity
         uint desiredAccess,
         [MarshalAs(UnmanagedType.Bool)] bool inheritHandle,
         uint processId);
+
+    [LibraryImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool OpenProcessToken(
+        SafeProcessHandle process,
+        uint desiredAccess,
+        out SafeAccessTokenHandle token);
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
