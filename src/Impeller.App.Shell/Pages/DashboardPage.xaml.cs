@@ -2,6 +2,7 @@
 using Impeller.App.ViewModels.Controls;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Input;
 using Microsoft.UI.Xaml.Input;
 using Windows.System;
 
@@ -67,7 +68,7 @@ public sealed partial class DashboardPage : Page
     /// <summary>Notes that the user is typing, so an arriving snapshot does not overwrite them.</summary>
     private void OnNameFocused(object sender, RoutedEventArgs e)
     {
-        if (sender is TextBox { DataContext: ControlCardViewModel card })
+        if (sender is TextBox { Tag: ControlCardViewModel card })
         {
             card.IsRenaming = true;
         }
@@ -76,7 +77,7 @@ public sealed partial class DashboardPage : Page
     /// <summary>Commits on Enter, and abandons on Escape.</summary>
     private async void OnNameKeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (sender is not TextBox { DataContext: ControlCardViewModel card } box)
+        if (sender is not TextBox { Tag: ControlCardViewModel card } box)
         {
             return;
         }
@@ -84,7 +85,17 @@ public sealed partial class DashboardPage : Page
         if (e.Key == VirtualKey.Enter)
         {
             e.Handled = true;
-            await card.RenameCommand.ExecuteAsync(null);
+
+            // Moving focus out raises LostFocus, which is the commit. Doing both would send the
+            // rename twice, so this only commits directly when the focus did not move.
+            //
+            // The overload with a search root is not optional: the one-argument TryMoveFocus is
+            // unsupported in a WinUI Desktop app and throws a catastrophic-failure COMException
+            // out of an async void handler, which takes the whole shell down. It did.
+            if (!MoveFocusOut())
+            {
+                await card.RenameCommand.ExecuteAsync(null);
+            }
         }
         else if (e.Key == VirtualKey.Escape)
         {
@@ -97,7 +108,7 @@ public sealed partial class DashboardPage : Page
     /// <summary>Commits when the field is left, which is how most people finish typing.</summary>
     private async void OnNameCommitted(object sender, RoutedEventArgs e)
     {
-        if (sender is TextBox { DataContext: ControlCardViewModel card })
+        if (sender is TextBox { Tag: ControlCardViewModel card })
         {
             await card.RenameCommand.ExecuteAsync(null);
         }
@@ -135,20 +146,27 @@ public sealed partial class DashboardPage : Page
         }
     }
 
+
     /// <summary>
-    /// Takes a fan by hand, or hands it back.
+    /// Moves focus off the field being edited, which is what commits it.
     /// </summary>
+    /// <returns>Whether focus actually moved.</returns>
     /// <remarks>
-    /// A handler rather than a two-way binding, because the switch is bound one-way to what the
-    /// engine says is actually holding the fan: a claim the engine refuses must leave the switch
-    /// showing the truth rather than what was clicked.
+    /// Guarded, because failing to move focus is a cosmetic disappointment and throwing out of a
+    /// keystroke handler is a closed application.
     /// </remarks>
-    private async void OnModeToggled(object sender, RoutedEventArgs e)
+    private bool MoveFocusOut()
     {
-        if (sender is ToggleSwitch { DataContext: ControlCardViewModel card } toggle
-            && toggle.IsOn != card.IsPinned)
+        try
         {
-            await card.SetModeCommand.ExecuteAsync(toggle.IsOn);
+            return Content is DependencyObject root
+                && FocusManager.TryMoveFocus(
+                    FocusNavigationDirection.Next,
+                    new FindNextElementOptions { SearchRoot = root });
+        }
+        catch (Exception)
+        {
+            return false;
         }
     }
 }

@@ -27,13 +27,13 @@ public class RestingStateTests
     /// <summary>One fan, optionally with a curve, optionally able to hand back to firmware.</summary>
     private sealed class Harness
     {
-        public Harness(bool withCurve = false, bool supportsAutomatic = true)
+        public Harness(bool withCurve = false, bool supportsAutomatic = true, bool enabled = true)
         {
             Fan = Registry.Add(new FakeControl("System Fan #3") { SupportsAutomaticMode = supportsAutomatic });
             Curve = new FlatCurve(CurveId.New(), "rest", new Duty(50f));
             Loop = new ControlLoop(Registry, Ownership, TimeProvider.System);
 
-            Configure(withCurve);
+            Configure(withCurve, enabled);
         }
 
         public FakeSensorRegistry Registry { get; } = new();
@@ -132,16 +132,63 @@ public class RestingStateTests
     }
 
     [Fact]
-    public void A_disabled_fan_is_left_alone_entirely()
+    public void A_fan_that_was_never_driven_is_left_alone_entirely()
     {
         // Disabled means Impeller does not touch it, which includes not handing it anywhere.
-        var harness = new Harness();
-        harness.Configure(withCurve: false, enabled: false);
+        var harness = new Harness(enabled: false);
 
         harness.Loop.Tick(Tick);
 
         Assert.Equal(0, harness.Fan.AutomaticModeRestoreAttempts);
         Assert.Empty(harness.Fan.Writes);
+    }
+
+    [Fact]
+    public void Switching_a_fan_off_hands_it_back_rather_than_leaving_it_where_it_was()
+    {
+        // The last way left to freeze a fan. The tick loop skips a disabled binding before it
+        // reaches the resting logic - correctly, because disabled has to mean the engine does not
+        // touch this control - so a fan pinned at 20 % and then switched off stayed at 20 % for as
+        // long as the machine was on, with nothing managing it and no reason to look. The handover
+        // has to happen on the way out, while the engine still considers the control its own.
+        var harness = new Harness(withCurve: true);
+
+        harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.ManualOverride, "shell");
+        harness.Loop.TrySetRequestedDuty(harness.FanId, new Duty(20f), "shell");
+        harness.Loop.Tick(Tick);
+
+        Assert.Equal(20f, harness.Fan.CommandedDuty!.Value.Percent, precision: 3);
+
+        harness.Configure(withCurve: true, enabled: false);
+
+        Assert.Equal(1, harness.Fan.AutomaticModeRestoreAttempts);
+    }
+
+    [Fact]
+    public void A_fan_that_cannot_be_handed_back_gets_its_failsafe_duty_when_switched_off()
+    {
+        var harness = new Harness(withCurve: true, supportsAutomatic: false);
+
+        harness.Loop.Tick(Tick);
+        harness.Fan.Writes.Clear();
+
+        harness.Configure(withCurve: true, enabled: false);
+
+        Assert.Equal(80f, Assert.Single(harness.Fan.Writes).Percent, precision: 3);
+    }
+
+    [Fact]
+    public void Switching_a_fan_off_twice_hands_it_back_once()
+    {
+        // Every configuration change runs this, and a fan that has already been let go of must not
+        // be written again each time something unrelated is saved.
+        var harness = new Harness(withCurve: true);
+
+        harness.Loop.Tick(Tick);
+        harness.Configure(withCurve: true, enabled: false);
+        harness.Configure(withCurve: true, enabled: false);
+
+        Assert.Equal(1, harness.Fan.AutomaticModeRestoreAttempts);
     }
 
     // ---- what that unlocks ------------------------------------------------------------------
@@ -155,6 +202,25 @@ public class RestingStateTests
 
         Assert.True(harness.Loop.CanBeHeldByPlugin(harness.FanId));
         Assert.True(harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, Plugin).Succeeded);
+    }
+
+    [Fact]
+    public void A_person_may_hold_a_fan_that_has_no_curve()
+    {
+        // The shell required a curve before it would let anyone drive a fan by hand. The engine
+        // never did, and the rule made no sense: a pin is a complete instruction, and having to
+        // invent a curve you do not want in order to ignore it is absurd.
+        var harness = new Harness();
+
+        Assert.True(harness.Loop.IsDriven(harness.FanId));
+        Assert.True(harness.Loop
+            .TryAcquire(harness.FanId, ControlOwnerKind.ManualOverride, "shell")
+            .Succeeded);
+
+        harness.Loop.TrySetRequestedDuty(harness.FanId, new Duty(35f), "shell");
+        harness.Loop.Tick(Tick);
+
+        Assert.Equal(35f, harness.Fan.CommandedDuty!.Value.Percent, precision: 3);
     }
 
     [Fact]

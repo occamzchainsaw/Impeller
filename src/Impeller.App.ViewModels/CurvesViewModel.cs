@@ -57,6 +57,16 @@ public sealed partial class CurvesViewModel(EngineConnection connection, Notific
     /// <summary>Every curve in the configuration.</summary>
     public ObservableCollection<CurveListItemViewModel> Curves { get; } = [];
 
+    /// <summary>
+    /// How the page asks the user to confirm deleting a curve, or null to delete without asking.
+    /// </summary>
+    /// <remarks>
+    /// Supplied by the view rather than reached for, because a dialog is a UI-framework thing and
+    /// this project deliberately has none. The message is composed here, where the facts are: which
+    /// curve it is, and how many fans stop being driven by it.
+    /// </remarks>
+    public Func<string, string, Task<bool>>? Confirm { get; set; }
+
     /// <summary>The sensors a curve can read, restricted to temperatures.</summary>
     public SensorTreeViewModel SensorPicker { get; } = new()
     {
@@ -394,6 +404,17 @@ public sealed partial class CurvesViewModel(EngineConnection connection, Notific
             return;
         }
 
+        // A curve that was never saved has nothing to lose, so asking about it would be a dialog
+        // for a keystroke. Everything else is asked about: Delete sits next to Save and Revert, one
+        // click from each, and the curves it removes are the only thing on this page that cannot be
+        // got back.
+        if (IsSaved(selected)
+            && Confirm is { } confirm
+            && !await confirm($"Delete '{selected.Name}'?", DeletionCost(selected)).ConfigureAwait(true))
+        {
+            return;
+        }
+
         var curves = snapshot.Configuration.Curves
             .Where(curve => curve.Id != selected.Id)
             .ToArray();
@@ -435,6 +456,20 @@ public sealed partial class CurvesViewModel(EngineConnection connection, Notific
     /// <summary>Whether the engine has this curve, as opposed to it only existing on this page.</summary>
     private bool IsSaved(CurveListItemViewModel item) =>
         Snapshot is { } snapshot && snapshot.Configuration.Curves.Any(curve => curve.Id == item.Id);
+
+    /// <summary>
+    /// What deleting this curve costs, in the terms the user cares about.
+    /// </summary>
+    /// <remarks>
+    /// The fans are the point. Deleting a curve switches off everything it was driving, and a
+    /// confirmation that did not say so would be a speed bump rather than a warning.
+    /// </remarks>
+    private static string DeletionCost(CurveListItemViewModel item) => item.Users switch
+    {
+        0 => "Nothing is using it, so nothing else changes.",
+        1 => "The fan it drives will be switched off. This cannot be undone.",
+        var count => $"The {count} fans it drives will be switched off. This cannot be undone.",
+    };
 
     private async Task<bool> ApplyAsync(ImpellerConfiguration configuration)
     {

@@ -62,6 +62,7 @@
                                             <TextBox
                                                 Padding="0"
                                                 VerticalAlignment="Center"
+                                                VerticalContentAlignment="Center"
                                                 Background="Transparent"
                                                 BorderThickness="0"
                                                 GotFocus="OnNameFocused"

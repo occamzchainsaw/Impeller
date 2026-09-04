@@ -73,8 +73,16 @@
 
                 <ItemsRepeater.ItemTemplate>
                     <DataTemplate x:DataType="controls:ControlCardViewModel">
-                        <Border
-                            Padding="16,14,16,14"
+                        <!--
+                            Every control here that raises an event rather than binding a command
+                            carries its card in Tag. The handlers used to read DataContext, which
+                            inside an ItemsRepeater template is not something to depend on: the
+                            cards rendered perfectly - x:Bind resolves against the item directly and
+                            never consults it - while the mode switch and the name box's Enter and
+                            focus-loss handlers silently did nothing at all. Identify was the one
+                            control that kept working, because it is bound to a command.
+                        -->
+                        <Border Padding="16,14,16,14"
                             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                             BorderThickness="1"
@@ -98,6 +106,7 @@
                                     <TextBox
                                         Padding="0"
                                         VerticalAlignment="Center"
+                                        VerticalContentAlignment="Center"
                                         Background="Transparent"
                                         BorderThickness="0"
                                         FontWeight="SemiBold"
@@ -105,6 +114,7 @@
                                         KeyDown="OnNameKeyDown"
                                         LostFocus="OnNameCommitted"
                                         MaxLength="64"
+                                        Tag="{x:Bind}"
                                         Text="{x:Bind EditableName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                         ToolTipService.ToolTip="{x:Bind local:DashboardPage.Where(ProviderName, HardwareName, HardwarePath), Mode=OneWay}" />
 
@@ -171,10 +181,10 @@
                                     <ToggleSwitch
                                         MinWidth="0"
                                         IsEnabled="{x:Bind CanTakeByHand, Mode=OneWay}"
-                                        IsOn="{x:Bind IsPinned, Mode=OneWay}"
-                                        OffContent="Curve"
+                                        IsOn="{x:Bind WantsManual, Mode=TwoWay}"
+                                        OffContent="{x:Bind ModeOffLabel, Mode=OneWay}"
                                         OnContent="Manual"
-                                        Toggled="OnModeToggled" />
+                                        ToolTipService.ToolTip="Drive this fan by hand. It does not need a curve." />
 
                                     <!--  Dead unless the user holds the fan. A slider that silently does nothing is worse than none.  -->
                                     <Slider

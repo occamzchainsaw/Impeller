@@ -107,6 +107,8 @@ public sealed class ControlLoop
         // handover happens once per rest, so the record of it has to go when the rules change.
         _resting.Clear();
 
+        var previous = _bindings;
+
         // Bindings first: the sort needs to know which curve drives which control before it can
         // follow a sync curve's control edge back to the curve behind it.
         var bound = bindings.ToDictionary(binding => binding.ControlId);
@@ -125,7 +127,47 @@ public sealed class ControlLoop
         _startStop = bound.ToDictionary(entry => entry.Key, entry => new StartStopGate(entry.Value));
 
         DropClaimsTheConfigurationNoLongerSupports();
+        RestControlsNoLongerDriven(previous);
         RestoreManualPins(bound.Values);
+    }
+
+    /// <summary>
+    /// Hands back any control this configuration has stopped driving.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Switching a fan off in Impeller used to leave it at whatever duty was last written to it,
+    /// for as long as the machine stayed on. The tick loop skips a disabled binding before it
+    /// reaches the resting logic — correctly, because "disabled" has to mean the engine does not
+    /// touch this control — so nothing ever moved the fan again. A user who pinned a fan at 20 %
+    /// and then switched it off got a fan permanently at 20 %, and no reason to look.
+    /// </para>
+    /// <para>
+    /// So the handover happens on the way out, once, while the engine still considers the control
+    /// its own. This is the same hazard the resting state fixed for a curveless fan; disabling one
+    /// was the last way left to reach it.
+    /// </para>
+    /// <para>
+    /// A write that fails here is not reported: the tick loop will never look at this control
+    /// again, so there is nowhere to report it to. The fan stays where it was, which is exactly
+    /// what happened before this existed.
+    /// </para>
+    /// </remarks>
+    private void RestControlsNoLongerDriven(IReadOnlyDictionary<SensorId, ControlBinding> previous)
+    {
+        var unreported = new Dictionary<SensorId, Exception>();
+
+        foreach (var (controlId, was) in previous)
+        {
+            if (!was.Enabled
+                || (_bindings.TryGetValue(controlId, out var now) && now.Enabled)
+                || _registry.GetControl(controlId) is not { } control)
+            {
+                continue;
+            }
+
+            Rest(was, control, unreported);
+        }
     }
 
     /// <summary>

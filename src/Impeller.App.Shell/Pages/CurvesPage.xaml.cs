@@ -32,6 +32,7 @@ public sealed partial class CurvesPage : Page
 
         Canvas.CurveChanged += (_, _) => ViewModel.IsDirty = true;
         ViewModel.PropertyChanged += OnViewModelChanged;
+        ViewModel.Confirm = ConfirmAsync;
 
         Loaded += async (_, _) => await ViewModel.LoadAsync().ConfigureAwait(true);
 
@@ -87,6 +88,28 @@ public sealed partial class CurvesPage : Page
 
     /// <summary>A sensor with its current reading, so the choice can be made on live values.</summary>
     public static string DescribeSensor(string name, string value) => $"{name}   {value}";
+
+    /// <summary>
+    /// Asks before doing something that cannot be undone.
+    /// </summary>
+    /// <remarks>
+    /// The default button is Cancel. A confirmation whose dangerous answer is one Enter away is a
+    /// confirmation that trains people to press Enter.
+    /// </remarks>
+    private async Task<bool> ConfirmAsync(string title, string message)
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = title,
+            Content = message,
+            PrimaryButtonText = "Delete",
+            CloseButtonText = "Keep it",
+            DefaultButton = ContentDialogButton.Close,
+        };
+
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+    }
 
     private void OnViewModelChanged(object? sender, PropertyChangedEventArgs e)
     {

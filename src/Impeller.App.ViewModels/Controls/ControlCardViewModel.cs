@@ -132,9 +132,20 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
     /// <summary>The curves this fan can be pointed at, including "not driven".</summary>
     public IReadOnlyList<CurveChoice> Curves { get; private set; } = [];
 
-    /// <summary>Which one it is pointed at now.</summary>
+    /// <summary>
+    /// Which one it is pointed at now.
+    /// </summary>
+    /// <remarks>
+    /// Nullable, and that is load-bearing rather than tidiness. A <c>ComboBox</c> clears its
+    /// <c>SelectedItem</c> to null whenever its <c>ItemsSource</c> is replaced — which happens on
+    /// every rebind — and the two-way binding generated for a non-nullable value type unboxes that
+    /// null straight into a <see cref="NullReferenceException"/>. The exception surfaces through
+    /// the WinRT boundary as a stowed fault that no managed handler sees, so it took the whole
+    /// shell down at startup, intermittently, leaving nothing behind but a Windows Error Reporting
+    /// entry naming a system DLL.
+    /// </remarks>
     [ObservableProperty]
-    public partial CurveChoice SelectedCurve { get; set; } = CurveChoice.None;
+    public partial CurveChoice? SelectedCurve { get; set; } = CurveChoice.None;
 
     /// <summary>The duty standing at it, ready to read.</summary>
     [ObservableProperty]
@@ -152,6 +163,36 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
     [ObservableProperty]
     public partial bool IsPinned { get; private set; }
 
+    /// <summary>
+    /// Where the mode switch is set, which is a request rather than a fact.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The switch binds here two-way instead of raising an event. <c>Toggled</c> fires for
+    /// programmatic changes as well as clicks, so with the switch also following
+    /// <see cref="IsPinned"/> the two drove each other: one click produced eight events, taking the
+    /// fan and letting go of it again several times over, and the fan ended up exactly where it
+    /// started. The log of it reads True, False, True, False.
+    /// </para>
+    /// <para>
+    /// Acting only when this differs from <see cref="IsPinned"/> is what breaks the loop, and it
+    /// needs no suppression flag: an echo of the current state is, by definition, not a change.
+    /// </para>
+    /// </remarks>
+    [ObservableProperty]
+    public partial bool WantsManual { get; set; }
+
+    /// <summary>
+    /// What letting go of the fan would leave it doing.
+    /// </summary>
+    /// <remarks>
+    /// The other half of the mode switch, and it has to name the outcome rather than the mechanism.
+    /// A fan with a curve goes back to it; one without is simply off, and labelling that "Curve"
+    /// would promise a curve that does not exist.
+    /// </remarks>
+    [ObservableProperty]
+    public partial string ModeOffLabel { get; private set; } = "Off";
+
     /// <summary>Whether something other than the user or its curve holds it.</summary>
     [ObservableProperty]
     public partial bool IsHeldElsewhere { get; private set; }
@@ -160,7 +201,14 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
     [ObservableProperty]
     public partial bool IsDriven { get; private set; }
 
-    /// <summary>Whether the user could take it by hand right now.</summary>
+    /// <summary>
+    /// Whether the user could take it by hand right now.
+    /// </summary>
+    /// <remarks>
+    /// A fan that is switched off qualifies. Taking it by hand is itself the instruction to start
+    /// driving it, so refusing until it had already been switched on made the obvious thing to
+    /// click the one thing that did nothing.
+    /// </remarks>
     [ObservableProperty]
     public partial bool CanTakeByHand { get; private set; }
 
@@ -212,7 +260,13 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
 
         _binding = binding;
         Curves = [.. curves];
-        IsDriven = binding.Enabled && !binding.CurveId.IsNone;
+        ModeOffLabel = binding.CurveId.IsNone ? "Off" : "Curve";
+
+        // The engine's own rule, and nothing more. This used to require a curve as well, which is
+        // where "you must give a fan a curve before you can drive it by hand" came from - a rule
+        // the engine never had and one that made no sense: a pin is a complete instruction, and
+        // needing to invent a curve you do not want in order to ignore it is absurd.
+        IsDriven = binding.Enabled;
 
         _suppressCurve = true;
         SelectedCurve = Curves.FirstOrDefault(curve => curve.Id == binding.CurveId, CurveChoice.None);
@@ -242,7 +296,11 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
 
         IsPinned = reading.Owner == ControlOwnerKind.ManualOverride;
         IsHeldElsewhere = reading.Owner is ControlOwnerKind.Plugin or ControlOwnerKind.Failsafe;
-        CanTakeByHand = IsPresent && IsDriven && !IsHeldElsewhere;
+
+        // Follows the fan, so the switch is right when something else takes it or hands it back.
+        // Assigning the value it already holds raises nothing, so this cannot start a loop.
+        WantsManual = IsPinned;
+        CanTakeByHand = IsPresent && !IsHeldElsewhere;
 
         // Only the exceptional holders. When the fan's own curve is driving it the picker directly
         // below already says which, and repeating it there is a card telling the user the same
@@ -257,6 +315,11 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
 
             ControlOwnerKind.Failsafe => "Failsafe",
             _ when !IsPresent => "Not connected",
+
+            // Nothing is driving it, and that is a state worth naming rather than leaving blank.
+            // The engine has handed it back, so the answer to "what is deciding this fan's speed"
+            // is the board itself.
+            _ when _binding.CurveId.IsNone => "Its own firmware",
             _ => string.Empty,
         };
 
@@ -300,13 +363,34 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
         await SendAsync(engine => engine.RenameAsync(Id, value)).ConfigureAwait(true);
     }
 
-    /// <summary>Takes the fan by hand, or hands it back to its curve.</summary>
+    /// <summary>
+    /// Takes the fan by hand, or hands it back.
+    /// </summary>
     /// <remarks>
+    /// <para>
     /// One command for both directions, because they are one decision: what is driving this fan.
     /// The card used to carry two buttons that were each other's inverse, one of them called "Hold
     /// by hand", which named an implementation rather than an intent.
+    /// </para>
+    /// <para>
+    /// Taking a switched-off fan by hand switches it on first. That is what the click means, and
+    /// the alternative is a control that is correct about the engine's rules and useless to the
+    /// person pressing it.
+    /// </para>
+    /// <para>
+    /// Letting go hands it back to its curve, or switches it off when it has none — the same state
+    /// it was in before, and the engine rests it on the way rather than leaving it stuck at the
+    /// duty the user last chose.
+    /// </para>
     /// </remarks>
-    [RelayCommand]
+    partial void OnWantsManualChanged(bool value)
+    {
+        if (value != IsPinned)
+        {
+            _ = SetModeAsync(value);
+        }
+    }
+
     private async Task SetModeAsync(bool byHand)
     {
         if (byHand == IsPinned)
@@ -317,7 +401,26 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
         if (!byHand)
         {
             await SendAsync(engine => engine.ReleaseControlAsync(Id)).ConfigureAwait(true);
+
+            // The stored pin goes with the claim. Keeping it would have the fan seize itself again
+            // the next time this binding was enabled, overriding the curve it was just given.
+            if (_binding.ManualDuty is not null || _binding.CurveId.IsNone)
+            {
+                await _save(_binding with
+                {
+                    ManualDuty = null,
+                    Enabled = !_binding.CurveId.IsNone,
+                }).ConfigureAwait(true);
+            }
+
             return;
+        }
+
+        // Applied and awaited before the claim, because the engine refuses a claim on a control it
+        // is not driving and the claim below would otherwise race the configuration reaching it.
+        if (!_binding.Enabled)
+        {
+            await _save(_binding with { Enabled = true }).ConfigureAwait(true);
         }
 
         await SendAsync(async engine =>
@@ -352,18 +455,24 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
     /// Points it at a different curve, and saves.
     /// </summary>
     /// <remarks>
-    /// The curve picker is also the on switch, which is why there is no longer a separate one. A
-    /// fan with no curve is a fan the engine is not driving; those were always one fact wearing two
-    /// controls, and keeping both let a user set one and be surprised by the other.
+    /// The curve picker is also the on switch, which is why there is no longer a separate one: a
+    /// fan with nothing driving it is a fan that is off, and those were one fact wearing two
+    /// controls. Holding it by hand is the other way of driving it, so choosing "Not driven" while
+    /// the user has hold of it clears the curve and leaves the fan on.
     /// </remarks>
-    partial void OnSelectedCurveChanged(CurveChoice value)
+    partial void OnSelectedCurveChanged(CurveChoice? value)
     {
-        if (_suppressCurve)
+        // Two ways this fires without anyone having chosen anything. A null is the picker clearing
+        // itself while its items are being replaced. And the write-back from a replaced ItemsSource
+        // arrives through a dependency-property callback, which lands after the flag below has been
+        // put down again - so the flag alone is not enough, and the honest test is whether the
+        // choice actually differs from what the fan is already set to.
+        if (_suppressCurve || value is not { } choice || choice.Id == _binding.CurveId)
         {
             return;
         }
 
-        _ = _save(_binding with { CurveId = value.Id, Enabled = !value.Id.IsNone });
+        _ = _save(_binding with { CurveId = choice.Id, Enabled = !choice.Id.IsNone || IsPinned });
     }
 
     /// <summary>
