@@ -1,11 +1,11 @@
-using Impeller.App.ViewModels;
+﻿using Impeller.App.ViewModels;
 using Impeller.App.ViewModels.Controls;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
 namespace Impeller.App.Shell.Pages;
 
-/// <summary>The overview page: engine state, and every control with what is driving it.</summary>
+/// <summary>The overview page: engine state, and every configured fan with what is driving it.</summary>
 public sealed partial class DashboardPage : Page
 {
     public DashboardPage()
@@ -39,20 +39,71 @@ public sealed partial class DashboardPage : Page
     /// <summary>Inverts a flag, which x:Bind cannot do on its own.</summary>
     public static bool Not(bool value) => !value;
 
+    /// <summary>Shown when the condition holds.</summary>
+    public static Visibility When(bool condition) =>
+        condition ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Shown when it does not.</summary>
+    public static Visibility WhenNot(bool condition) =>
+        condition ? Visibility.Collapsed : Visibility.Visible;
+
+    /// <summary>Shown only when there is something to say.</summary>
+    public static Visibility WhenText(string? text) =>
+        string.IsNullOrWhiteSpace(text) ? Visibility.Collapsed : Visibility.Visible;
+
+    /// <summary>The slider's position as a label.</summary>
+    public static string Percent(float value) => $"{value:0}%";
+
+    /// <summary>Which piece of hardware a fan hangs off, for a tooltip rather than the card's face.</summary>
+    public static string Where(string hardware, string path) =>
+        string.IsNullOrWhiteSpace(hardware) ? path : $"{hardware}\n{path}";
+
     /// <summary>
-    /// Turns engine control of one fan on or off.
+    /// Fills the Add a fan menu at the moment it opens.
     /// </summary>
     /// <remarks>
-    /// A handler rather than a two-way binding, because the switch is bound one-way to the saved
-    /// state: a save that the engine refuses must leave the switch showing what is actually in
-    /// force, not what was clicked.
+    /// Built on opening rather than bound, because a MenuFlyout has no ItemsSource — and because
+    /// the set changes whenever a fan is added, which is exactly when this next opens.
     /// </remarks>
-    private async void OnDrivenToggled(object sender, RoutedEventArgs e)
+    private void OnAvailableOpening(object? sender, object e)
+    {
+        AvailableFans.Items.Clear();
+
+        if (ViewModel.Available.Count == 0)
+        {
+            AvailableFans.Items.Add(new MenuFlyoutItem
+            {
+                Text = "Every fan the engine can see is already here",
+                IsEnabled = false,
+            });
+
+            return;
+        }
+
+        foreach (var fan in ViewModel.Available)
+        {
+            var item = new MenuFlyoutItem { Text = fan.ToString() };
+            var chosen = fan;
+
+            item.Click += async (_, _) => await ViewModel.AddFanCommand.ExecuteAsync(chosen);
+            AvailableFans.Items.Add(item);
+        }
+    }
+
+    /// <summary>
+    /// Takes a fan by hand, or hands it back.
+    /// </summary>
+    /// <remarks>
+    /// A handler rather than a two-way binding, because the switch is bound one-way to what the
+    /// engine says is actually holding the fan: a claim the engine refuses must leave the switch
+    /// showing the truth rather than what was clicked.
+    /// </remarks>
+    private async void OnModeToggled(object sender, RoutedEventArgs e)
     {
         if (sender is ToggleSwitch { DataContext: ControlCardViewModel card } toggle
-            && toggle.IsOn != card.IsDriven)
+            && toggle.IsOn != card.IsPinned)
         {
-            await card.SetDrivenCommand.ExecuteAsync(toggle.IsOn);
+            await card.SetModeCommand.ExecuteAsync(toggle.IsOn);
         }
     }
 }

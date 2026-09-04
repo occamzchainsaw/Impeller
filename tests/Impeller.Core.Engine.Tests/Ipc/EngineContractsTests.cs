@@ -144,7 +144,7 @@ public sealed class EngineContractsTests : IAsyncDisposable
             42,
             DateTimeOffset.UnixEpoch,
             [new SensorReading(FakeEngine.CpuSensor, 61.5f)],
-            [new ControlReading(FakeEngine.FanControl, new Duty(55f), ControlOwnerKind.Curve)]);
+            [new ControlReading(FakeEngine.FanControl, new Duty(55f), ControlOwnerKind.Plugin, "com.example.rigfan")]);
 
         await _engine.Events!.OnTickAsync(tick);
 

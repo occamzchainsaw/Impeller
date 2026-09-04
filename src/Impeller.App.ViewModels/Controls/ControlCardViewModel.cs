@@ -13,14 +13,19 @@ namespace Impeller.App.ViewModels.Controls;
 /// <remarks>
 /// <para>
 /// The card is the app's smallest complete unit: what this fan is doing, what is deciding that, and
-/// the three things a person wants to do about it — take it by hand, hand it back, and make it spin
-/// up so they can work out which one it is behind the case panel.
+/// the things a person wants to do about it — point it at a curve, take it by hand, hand it back,
+/// and make it spin up so they can work out which one it is behind the case panel.
 /// </para>
 /// <para>
-/// Everything it changes goes through the engine, and it holds no authority of its own. Pinning a
-/// fan is a claim the engine grants or refuses, and a refusal is displayed rather than worked
-/// around: two things quietly fighting over one fan is the failure this whole ownership model
-/// exists to make impossible.
+/// Everything it changes goes through the engine, and it holds no authority of its own. Taking a
+/// fan by hand is a claim the engine grants or refuses, and a refusal is displayed rather than
+/// worked around: two things quietly fighting over one fan is the failure this whole ownership
+/// model exists to make impossible.
+/// </para>
+/// <para>
+/// When something else holds the fan the card names it and the slider goes dead. A live slider on a
+/// fan somebody else is driving is a control that silently does nothing, which is worse than no
+/// control at all.
 /// </para>
 /// </remarks>
 public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDisposable
@@ -28,48 +33,58 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
     /// <summary>The shortest gap between two duty writes while the slider is moving.</summary>
     private static readonly TimeSpan WriteInterval = TimeSpan.FromMilliseconds(250);
 
-    private readonly EngineConnection _connection;
-    private readonly Func<ControlBindingDefinition, Task> _save;
-    private readonly ThrottledWriter<Duty> _writer;
-
-    private ControlBindingDefinition _binding;
-
     /// <summary>How long an identify run spins the fan up for.</summary>
     private static readonly TimeSpan IdentifyDuration = TimeSpan.FromSeconds(5);
 
     /// <summary>What an identify run spins it up to.</summary>
     private static readonly Duty IdentifyDuty = new(100f);
 
+    private readonly EngineConnection _connection;
+    private readonly Func<ControlBindingDefinition, Task> _save;
+    private readonly Func<string?, string?> _nameClaimant;
+    private readonly ThrottledWriter<Duty> _writer;
+
+    private ControlBindingDefinition _binding;
+    private bool _suppressWrite;
+    private bool _suppressCurve;
+
     public ControlCardViewModel(
-        ControlDescriptor descriptor,
+        ControlDescriptor? descriptor,
         ControlBindingDefinition binding,
-        string curveName,
+        IEnumerable<CurveChoice> curves,
         EngineConnection connection,
-        Func<ControlBindingDefinition, Task> save)
+        Func<ControlBindingDefinition, Task> save,
+        Func<string?, string?> nameClaimant)
     {
-        ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentNullException.ThrowIfNull(binding);
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(save);
+        ArgumentNullException.ThrowIfNull(nameClaimant);
 
         _connection = connection;
         _save = save;
+        _nameClaimant = nameClaimant;
         _binding = binding;
-
         _writer = new ThrottledWriter<Duty>(TimeProvider.System, WriteInterval, SendDutyAsync);
 
-        Id = descriptor.Id;
-        Name = descriptor.Name;
-        HardwareName = descriptor.HardwareName;
-        HardwarePath = descriptor.HardwarePath;
-        CurveName = curveName;
-        IsDriven = binding.Enabled;
+        Id = binding.ControlId;
+        IsPresent = descriptor is not null;
+        Name = descriptor?.Name ?? "No longer present";
+        HardwareName = descriptor?.HardwareName ?? string.Empty;
+        HardwarePath = descriptor?.HardwarePath ?? string.Empty;
+
+        Rebind(binding, curves);
 
         // Where the slider starts. A stored pin is what the user last chose; otherwise the duty
         // standing now, so taking a fan by hand does not jolt it on the way.
-        PinDuty = binding.ManualDuty?.Percent ?? descriptor.CommandedDuty?.Percent ?? 0f;
+        PinDuty = binding.ManualDuty?.Percent ?? descriptor?.CommandedDuty?.Percent ?? 0f;
 
-        Apply(new ControlReading(descriptor.Id, descriptor.CommandedDuty, descriptor.Owner), null);
+        if (descriptor is not null)
+        {
+            Apply(
+                new ControlReading(Id, descriptor.CommandedDuty, descriptor.Owner, descriptor.ClaimantId),
+                null);
+        }
     }
 
     /// <summary>Which control this is.</summary>
@@ -78,18 +93,30 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
     /// <summary>What the hardware calls it, on its own.</summary>
     public string Name { get; }
 
-    /// <summary>What it belongs to, for a tooltip rather than for the card's face.</summary>
-    /// <remarks>
-    /// A card under a heading that already names the fan does not also need to say which chip it
-    /// hangs off. It matters when two fans share a name, which is why it is still carried.
-    /// </remarks>
+    /// <summary>What it hangs off, for a tooltip rather than the card's face.</summary>
     public string HardwareName { get; }
 
     /// <summary>Where it lives, for when two fans share a name.</summary>
     public string HardwarePath { get; }
 
+    /// <summary>
+    /// Whether the engine can still see this fan.
+    /// </summary>
+    /// <remarks>
+    /// A binding whose control has gone still gets a card, marked absent. Dropping it silently
+    /// would look exactly like Impeller having lost the user's settings.
+    /// </remarks>
+    public bool IsPresent { get; }
+
     /// <summary>The tacho paired with it, or none.</summary>
     public SensorId PairedFanSensorId => _binding.PairedFanSensorId;
+
+    /// <summary>The curves this fan can be pointed at, including "not driven".</summary>
+    public IReadOnlyList<CurveChoice> Curves { get; private set; } = [];
+
+    /// <summary>Which one it is pointed at now.</summary>
+    [ObservableProperty]
+    public partial CurveChoice SelectedCurve { get; set; } = CurveChoice.None;
 
     /// <summary>The duty standing at it, ready to read.</summary>
     [ObservableProperty]
@@ -101,27 +128,23 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
 
     /// <summary>What is deciding this fan's speed, named for a person.</summary>
     [ObservableProperty]
-    public partial string OwnerText { get; private set; } = "Curve";
+    public partial string HolderText { get; private set; } = "Not driven";
 
     /// <summary>Whether the user is holding it by hand.</summary>
     [ObservableProperty]
     public partial bool IsPinned { get; private set; }
 
     /// <summary>Whether something other than the user or its curve holds it.</summary>
-    /// <remarks>
-    /// A plugin, or the failsafe. Pinning is refused while this is set, and saying so up front is
-    /// better than a button that fails when pressed.
-    /// </remarks>
     [ObservableProperty]
     public partial bool IsHeldElsewhere { get; private set; }
 
-    /// <summary>Whether the engine drives this control at all.</summary>
+    /// <summary>Whether the engine drives this fan at all.</summary>
     [ObservableProperty]
     public partial bool IsDriven { get; private set; }
 
-    /// <summary>The curve behind it, by name.</summary>
+    /// <summary>Whether the user could take it by hand right now.</summary>
     [ObservableProperty]
-    public partial string CurveName { get; private set; }
+    public partial bool CanTakeByHand { get; private set; }
 
     /// <summary>Where the manual slider sits, in percent.</summary>
     [ObservableProperty]
@@ -130,9 +153,6 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
     /// <summary>Whether a request to the engine is in flight.</summary>
     [ObservableProperty]
     public partial bool IsBusy { get; private set; }
-
-    /// <summary>Set while the card is moving its own slider, so that does not read as a user edit.</summary>
-    private bool _suppressWrite;
 
     /// <summary>The last thing that went wrong, or null.</summary>
     [ObservableProperty]
@@ -149,20 +169,27 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
         ? "Not measured"
         : $"Starts at {_binding.StartDuty}, stalls below {_binding.StopDuty}";
 
-    /// <summary>Takes a fresh binding after the configuration changed.</summary>
-    public void Rebind(ControlBindingDefinition binding, string curveName)
+    /// <summary>Takes a fresh binding and curve list after the configuration changed.</summary>
+    public void Rebind(ControlBindingDefinition binding, IEnumerable<CurveChoice> curves)
     {
         ArgumentNullException.ThrowIfNull(binding);
 
         _binding = binding;
-        CurveName = curveName;
-        IsDriven = binding.Enabled;
+        Curves = [.. curves];
+        IsDriven = binding.Enabled && !binding.CurveId.IsNone;
+
+        _suppressCurve = true;
+        SelectedCurve = Curves.FirstOrDefault(curve => curve.Id == binding.CurveId, CurveChoice.None);
+        _suppressCurve = false;
 
         if (binding.ManualDuty is { } pinned)
         {
+            _suppressWrite = true;
             PinDuty = pinned.Percent;
+            _suppressWrite = false;
         }
 
+        OnPropertyChanged(nameof(Curves));
         OnPropertyChanged(nameof(CalibrationPoints));
         OnPropertyChanged(nameof(IsCalibrated));
         OnPropertyChanged(nameof(ThresholdText));
@@ -170,55 +197,70 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
     }
 
     /// <summary>Takes one tick's reading.</summary>
-    /// <param name="reading">The control's duty and owner.</param>
+    /// <param name="reading">The control's duty, owner and claimant.</param>
     /// <param name="rpm">Its paired tacho, or null when it has none or it is not reporting.</param>
     public void Apply(ControlReading reading, float? rpm)
     {
-        DutyText = reading.CommandedDuty?.ToString() ?? "not driven";
+        DutyText = reading.CommandedDuty?.ToString() ?? "—";
         SpeedText = rpm is { } speed ? $"{speed:0} RPM" : "—";
 
         IsPinned = reading.Owner == ControlOwnerKind.ManualOverride;
+        IsHeldElsewhere = reading.Owner is ControlOwnerKind.Plugin or ControlOwnerKind.Failsafe;
+        CanTakeByHand = IsPresent && IsDriven && !IsHeldElsewhere;
 
-        // Follows the fan while somebody else is driving it, so taking it by hand starts from where
-        // it already is rather than jolting it to wherever the slider happened to be left. Left
-        // alone once pinned: from that point the slider is the instruction, not a readout.
+        // Only the exceptional holders. When the fan's own curve is driving it the picker directly
+        // below already says which, and repeating it there is a card telling the user the same
+        // thing twice - which also buries the cards where something unusual is going on.
+        HolderText = reading.Owner switch
+        {
+            ControlOwnerKind.ManualOverride => "Held by you",
+
+            // Named, not just "a plugin". A user told that Rig Fan Control has their fan knows what
+            // to close; one told that something does, does not.
+            ControlOwnerKind.Plugin => $"Held by {_nameClaimant(reading.ClaimantId) ?? "a plugin"}",
+
+            ControlOwnerKind.Failsafe => "Failsafe",
+            _ when !IsPresent => "Not connected",
+            _ => string.Empty,
+        };
+
+        // Follows the fan while something else drives it, so taking it by hand starts where it
+        // already is. Left alone once pinned: from that point the slider is the instruction.
         if (!IsPinned && reading.CommandedDuty is { } commanded)
         {
             _suppressWrite = true;
             PinDuty = commanded.Percent;
             _suppressWrite = false;
         }
-        IsHeldElsewhere = reading.Owner is ControlOwnerKind.Plugin or ControlOwnerKind.Failsafe;
-
-        OwnerText = reading.Owner switch
-        {
-            ControlOwnerKind.ManualOverride => "Held by you",
-            ControlOwnerKind.Plugin => "Held by a plugin",
-            ControlOwnerKind.Failsafe => "Failsafe",
-            _ => IsDriven ? CurveName : "Not driven",
-        };
     }
 
-    /// <summary>Takes the fan by hand and holds it where the slider is.</summary>
+    /// <summary>Takes the fan by hand, or hands it back to its curve.</summary>
+    /// <remarks>
+    /// One command for both directions, because they are one decision: what is driving this fan.
+    /// The card used to carry two buttons that were each other's inverse, one of them called "Hold
+    /// by hand", which named an implementation rather than an intent.
+    /// </remarks>
     [RelayCommand]
-    private async Task PinAsync()
+    private async Task SetModeAsync(bool byHand)
     {
+        if (byHand == IsPinned)
+        {
+            return;
+        }
+
+        if (!byHand)
+        {
+            await SendAsync(engine => engine.ReleaseControlAsync(Id)).ConfigureAwait(true);
+            return;
+        }
+
         await SendAsync(async engine =>
         {
             var outcome = await engine.SetManualDutyAsync(Id, new Duty(PinDuty)).ConfigureAwait(true);
 
-            // Named rather than anonymous. "Something else has it" sends people looking; "a plugin
-            // called iracing has it" tells them what to close.
-            Problem = outcome.Granted
-                ? null
-                : $"Could not take this fan: {Describe(outcome)}";
+            Problem = outcome.Granted ? null : $"Could not take this fan: {Describe(outcome)}";
         }).ConfigureAwait(true);
     }
-
-    /// <summary>Hands it back to its curve.</summary>
-    [RelayCommand]
-    private async Task ReleaseAsync() =>
-        await SendAsync(engine => engine.ReleaseControlAsync(Id)).ConfigureAwait(true);
 
     /// <summary>
     /// Spins it up briefly so the user can hear which one it is.
@@ -240,27 +282,31 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
         }).ConfigureAwait(true);
     }
 
-    /// <summary>Turns engine control of this fan on or off, and saves.</summary>
-    [RelayCommand]
-    private async Task SetDrivenAsync(bool driven)
+    /// <summary>
+    /// Points it at a different curve, and saves.
+    /// </summary>
+    /// <remarks>
+    /// The curve picker is also the on switch, which is why there is no longer a separate one. A
+    /// fan with no curve is a fan the engine is not driving; those were always one fact wearing two
+    /// controls, and keeping both let a user set one and be surprised by the other.
+    /// </remarks>
+    partial void OnSelectedCurveChanged(CurveChoice value)
     {
-        IsDriven = driven;
-        await _save(_binding with { Enabled = driven }).ConfigureAwait(true);
-    }
+        if (_suppressCurve)
+        {
+            return;
+        }
 
-    /// <summary>Points it at a different curve, and saves.</summary>
-    [RelayCommand]
-    private async Task AssignCurveAsync(CurveId curveId) =>
-        await _save(_binding with { CurveId = curveId, Enabled = !curveId.IsNone && IsDriven })
-            .ConfigureAwait(true);
+        _ = _save(_binding with { CurveId = value.Id, Enabled = !value.Id.IsNone });
+    }
 
     /// <summary>
     /// Pushes the slider's new position to a fan that is already pinned.
     /// </summary>
     /// <remarks>
     /// Only while pinned. Dragging the slider on a fan its curve is driving should not silently
-    /// take the fan over — that is what the pin button is for, and a slider that seizes control on
-    /// touch is a slider people are afraid of.
+    /// take the fan over — that is what the mode control is for, and a slider that seizes control
+    /// on touch is a slider people are afraid of.
     /// </remarks>
     partial void OnPinDutyChanged(float value)
     {
@@ -279,9 +325,6 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
             await engine.SetManualDutyAsync(Id, duty, cancellationToken).ConfigureAwait(false);
         }
     }
-
-    /// <inheritdoc />
-    public ValueTask DisposeAsync() => _writer.DisposeAsync();
 
     private async Task SendAsync(Func<IEngineControl, Task> send)
     {
@@ -309,6 +352,9 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
         }
     }
 
+    /// <inheritdoc />
+    public ValueTask DisposeAsync() => _writer.DisposeAsync();
+
     private static string Describe(ControlAcquireOutcome outcome) => outcome.Failure switch
     {
         ControlAcquireFailure.AlreadyOwned when outcome.CurrentClaimantId is { } who =>
@@ -320,7 +366,7 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
         // Says what to do about it. This refusal exists precisely so that switching a fan off and
         // then wondering why the slider does nothing stops being a silent failure, and answering it
         // with "the engine refused" would give back the silence in a different font.
-        ControlAcquireFailure.NotDriven => "Impeller is not driving it — switch the fan on first.",
+        ControlAcquireFailure.NotDriven => "Impeller is not driving it — give it a curve first.",
         ControlAcquireFailure.NotPermitted => "it has not been granted to this program.",
         _ => "the engine refused.",
     };

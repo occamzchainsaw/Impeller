@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8" ?>
+﻿<?xml version="1.0" encoding="utf-8" ?>
 <Page
     x:Class="Impeller.App.Shell.Pages.DashboardPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -21,25 +21,26 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
             <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="{x:Bind ViewModel.Title}" />
 
-            <!--  The two numbers worth seeing without reading anything: how hot it is, and how much is being watched.  -->
-            <StackPanel
+            <TextBlock
                 Grid.Column="1"
                 VerticalAlignment="Center"
-                Orientation="Horizontal"
-                Spacing="16">
-                <TextBlock
-                    Style="{StaticResource SubtitleTextBlockStyle}"
-                    Text="{x:Bind ViewModel.HottestTemperature, Mode=OneWay}"
-                    ToolTipService.ToolTip="Hottest temperature reported" />
-                <TextBlock
-                    VerticalAlignment="Center"
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Text="{x:Bind local:DashboardPage.SensorSummary(ViewModel.SensorCount), Mode=OneWay}" />
-            </StackPanel>
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Text="{x:Bind local:DashboardPage.SensorSummary(ViewModel.SensorCount), Mode=OneWay}" />
+
+            <!--  Every fan the engine can see that is not already on this page.  -->
+            <DropDownButton
+                Grid.Column="2"
+                VerticalAlignment="Center"
+                Content="Add a fan">
+                <DropDownButton.Flyout>
+                    <MenuFlyout x:Name="AvailableFans" Opening="OnAvailableOpening" />
+                </DropDownButton.Flyout>
+            </DropDownButton>
         </Grid>
 
         <!--  Informational while connected, a warning when not: fans going unmanaged is not a neutral state.  -->
@@ -58,106 +59,162 @@
             Message="{x:Bind ViewModel.Problem, Mode=OneWay}"
             Severity="Error" />
 
-        <ScrollViewer Grid.Row="3">
-            <ItemsControl ItemsSource="{x:Bind ViewModel.Controls}">
-                <ItemsControl.ItemTemplate>
+        <!--  A configuration with no fans in it needs a sentence, not a blank panel.  -->
+        <StackPanel
+            Grid.Row="3"
+            VerticalAlignment="Top"
+            Spacing="6"
+            Visibility="{x:Bind local:DashboardPage.When(ViewModel.IsEmpty), Mode=OneWay}">
+            <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="No fans yet." />
+            <TextBlock
+                MaxWidth="560"
+                HorizontalAlignment="Left"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Text="Use Add a fan to bring one of this machine's headers onto the page. It arrives switched off; give it a curve to start driving it."
+                TextWrapping="Wrap" />
+        </StackPanel>
+
+        <!--
+            ItemsRepeater rather than ItemsControl, so only the tiles on screen are built. The list
+            it replaces materialised every control whether it was visible or not.
+        -->
+        <ScrollViewer Grid.Row="3" Visibility="{x:Bind local:DashboardPage.WhenNot(ViewModel.IsEmpty), Mode=OneWay}">
+            <ItemsRepeater ItemsSource="{x:Bind ViewModel.Controls}">
+                <ItemsRepeater.Layout>
+                    <UniformGridLayout
+                        ItemsStretch="Fill"
+                        MinColumnSpacing="12"
+                        MinItemWidth="320"
+                        MinRowSpacing="12" />
+                </ItemsRepeater.Layout>
+
+                <ItemsRepeater.ItemTemplate>
                     <DataTemplate x:DataType="controls:ControlCardViewModel">
                         <Border
-                            Margin="0,0,0,10"
-                            Padding="16,12,16,12"
+                            Padding="16,14,16,14"
                             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                             BorderThickness="1"
                             CornerRadius="8">
 
-                            <Grid RowSpacing="8">
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
+                            <StackPanel Spacing="10">
 
-                                <Grid ColumnSpacing="16">
+                                <!--  Name, and the way to work out which fan it physically is.  -->
+                                <Grid ColumnSpacing="8">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
 
-                                    <StackPanel>
-                                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="{x:Bind Name}" />
-                                        <TextBlock
-                                            FontSize="12"
-                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                            Text="{x:Bind OwnerText, Mode=OneWay}" />
-                                    </StackPanel>
+                                    <TextBlock
+                                        VerticalAlignment="Center"
+                                        Style="{StaticResource BodyStrongTextBlockStyle}"
+                                        Text="{x:Bind Name}"
+                                        TextTrimming="CharacterEllipsis"
+                                        ToolTipService.ToolTip="{x:Bind local:DashboardPage.Where(HardwareName, HardwarePath)}" />
+
+                                    <Button
+                                        Grid.Column="1"
+                                        Command="{x:Bind IdentifyCommand}"
+                                        Content="Identify"
+                                        IsEnabled="{x:Bind IsPresent}"
+                                        ToolTipService.ToolTip="Spin this fan up for five seconds" />
+                                </Grid>
+
+                                <!--  The two numbers, and who is deciding them.  -->
+                                <Grid ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <TextBlock
+                                        VerticalAlignment="Bottom"
+                                        Style="{StaticResource TitleTextBlockStyle}"
+                                        Text="{x:Bind DutyText, Mode=OneWay}" />
 
                                     <TextBlock
                                         Grid.Column="1"
-                                        MinWidth="64"
-                                        VerticalAlignment="Center"
-                                        Style="{StaticResource SubtitleTextBlockStyle}"
-                                        Text="{x:Bind DutyText, Mode=OneWay}"
-                                        TextAlignment="Right" />
+                                        Margin="0,0,0,4"
+                                        VerticalAlignment="Bottom"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Text="{x:Bind SpeedText, Mode=OneWay}" />
 
                                     <TextBlock
                                         Grid.Column="2"
-                                        MinWidth="88"
-                                        VerticalAlignment="Center"
+                                        Margin="0,0,0,4"
+                                        VerticalAlignment="Bottom"
                                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                        Text="{x:Bind SpeedText, Mode=OneWay}"
-                                        TextAlignment="Right" />
-
-                                    <!--  Identify sits on the card rather than behind a menu: working out which fan is which is the first thing anyone does.  -->
-                                    <StackPanel
-                                        Grid.Column="3"
-                                        Orientation="Horizontal"
-                                        Spacing="8">
-                                        <ToggleSwitch
-                                            MinWidth="0"
-                                            IsOn="{x:Bind IsDriven, Mode=OneWay}"
-                                            OffContent=""
-                                            OnContent=""
-                                            Toggled="OnDrivenToggled"
-                                            ToolTipService.ToolTip="Whether the engine drives this fan" />
-                                        <Button
-                                            Command="{x:Bind IdentifyCommand}"
-                                            Content="Identify"
-                                            ToolTipService.ToolTip="Spin this fan up for five seconds" />
-                                    </StackPanel>
+                                        Text="{x:Bind HolderText, Mode=OneWay}"
+                                        TextAlignment="Right"
+                                        TextTrimming="CharacterEllipsis"
+                                        ToolTipService.ToolTip="{x:Bind HolderText, Mode=OneWay}"
+                                        Visibility="{x:Bind local:DashboardPage.WhenText(HolderText), Mode=OneWay}" />
                                 </Grid>
 
-                                <Grid Grid.Row="1" ColumnSpacing="12">
+                                <!--
+                                    The curve picker is also the on switch: "Not driven" is one of
+                                    the choices. Those were always one fact, and having two controls
+                                    for it let a user set one and be surprised by the other.
+                                -->
+                                <ComboBox
+                                    HorizontalAlignment="Stretch"
+                                    Header="Driven by"
+                                    IsEnabled="{x:Bind IsPresent}"
+                                    ItemsSource="{x:Bind Curves, Mode=OneWay}"
+                                    SelectedItem="{x:Bind SelectedCurve, Mode=TwoWay}" />
+
+                                <!--  Curve or Manual: labelled by what drives the fan, not by what the control does.  -->
+                                <Grid ColumnSpacing="10">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
 
-                                    <Button
-                                        Command="{x:Bind PinCommand}"
-                                        Content="Hold by hand"
-                                        IsEnabled="{x:Bind local:DashboardPage.Not(IsHeldElsewhere), Mode=OneWay}" />
+                                    <ToggleSwitch
+                                        MinWidth="0"
+                                        IsEnabled="{x:Bind CanTakeByHand, Mode=OneWay}"
+                                        IsOn="{x:Bind IsPinned, Mode=OneWay}"
+                                        OffContent="Curve"
+                                        OnContent="Manual"
+                                        Toggled="OnModeToggled" />
 
+                                    <!--  Dead unless the user holds the fan. A slider that silently does nothing is worse than none.  -->
                                     <Slider
                                         Grid.Column="1"
                                         VerticalAlignment="Center"
+                                        IsEnabled="{x:Bind IsPinned, Mode=OneWay}"
                                         Maximum="100"
                                         Minimum="0"
                                         StepFrequency="1"
                                         Value="{x:Bind PinDuty, Mode=TwoWay}" />
 
-                                    <Button
+                                    <TextBlock
                                         Grid.Column="2"
-                                        Command="{x:Bind ReleaseCommand}"
-                                        Content="Back to curve"
-                                        IsEnabled="{x:Bind IsPinned, Mode=OneWay}" />
+                                        MinWidth="40"
+                                        VerticalAlignment="Center"
+                                        Text="{x:Bind local:DashboardPage.Percent(PinDuty), Mode=OneWay}"
+                                        TextAlignment="Right" />
                                 </Grid>
-                            </Grid>
+
+                                <InfoBar
+                                    IsClosable="True"
+                                    IsOpen="{x:Bind local:DashboardPage.HasText(Problem), Mode=OneWay}"
+                                    Message="{x:Bind Problem, Mode=OneWay}"
+                                    Severity="Warning" />
+
+                                <InfoBar
+                                    IsClosable="False"
+                                    IsOpen="{x:Bind local:DashboardPage.Not(IsPresent)}"
+                                    Message="This fan is in the configuration but the engine cannot see it. Its settings are kept."
+                                    Severity="Warning" />
+                            </StackPanel>
                         </Border>
                     </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
+                </ItemsRepeater.ItemTemplate>
+            </ItemsRepeater>
         </ScrollViewer>
     </Grid>
 </Page>

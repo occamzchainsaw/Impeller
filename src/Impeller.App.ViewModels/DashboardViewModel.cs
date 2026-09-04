@@ -1,5 +1,6 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using Impeller.App.ViewModels.Controls;
 using Impeller.App.ViewModels.Engine;
 using Impeller.Core.Abstractions;
@@ -13,26 +14,51 @@ namespace Impeller.App.ViewModels;
 /// <param name="Name">What the user calls it.</param>
 public readonly record struct CurveChoice(CurveId Id, string Name)
 {
-    /// <summary>The entry meaning "no curve", which is how a control is left alone.</summary>
-    public static CurveChoice None => new(CurveId.None, "No curve");
+    /// <summary>
+    /// The entry meaning the engine does not drive this fan.
+    /// </summary>
+    /// <remarks>
+    /// Named for the consequence rather than the mechanism. "No curve" describes the configuration;
+    /// "Not driven" describes the fan, which is the thing the person is looking at.
+    /// </remarks>
+    public static CurveChoice None => new(CurveId.None, "Not driven");
 
     /// <inheritdoc />
     public override string ToString() => Name;
+}
+
+/// <summary>A fan the engine can see that is not in the configuration yet.</summary>
+/// <param name="Id">Which control.</param>
+/// <param name="Name">What the hardware calls it.</param>
+/// <param name="HardwareName">What it hangs off, to tell two identically named fans apart.</param>
+public readonly record struct AvailableFan(SensorId Id, string Name, string HardwareName)
+{
+    /// <inheritdoc />
+    public override string ToString() =>
+        string.IsNullOrWhiteSpace(HardwareName) ? Name : $"{Name} — {HardwareName}";
 }
 
 /// <summary>
 /// The fan overview: the page the app opens on and the one people leave open.
 /// </summary>
 /// <remarks>
+/// <para>
+/// Shows the fans in the configuration, not every writable control on the machine. A motherboard
+/// offers headers nobody has wired anything to, and a page listing all of them buries the four that
+/// matter. Anything not listed is one click away behind <em>Add a fan</em>.
+/// </para>
+/// <para>
 /// Reads from the engine and never touches hardware itself. The shell holds no engine types at
 /// all — everything here arrives over the channel, which is what lets the engine keep running when
 /// this window is closed, and what would let a different front end replace it.
+/// </para>
 /// </remarks>
 public sealed partial class DashboardViewModel(EngineConnection connection)
     : EnginePageViewModel(connection)
 {
     private readonly Dictionary<SensorId, ControlCardViewModel> _cards = [];
     private readonly Dictionary<SensorId, SensorId> _tachometers = [];
+    private readonly Dictionary<string, string> _pluginNames = new(StringComparer.Ordinal);
 
     /// <inheritdoc />
     public override string Title => "Dashboard";
@@ -41,19 +67,47 @@ public sealed partial class DashboardViewModel(EngineConnection connection)
     [ObservableProperty]
     public partial int SensorCount { get; private set; }
 
-    /// <summary>The hottest temperature currently reported, formatted for display.</summary>
-    [ObservableProperty]
-    public partial string HottestTemperature { get; private set; } = "—";
-
     /// <summary>Whatever the last edit from this page turned up, or null.</summary>
     [ObservableProperty]
     public partial string? Problem { get; private set; }
 
-    /// <summary>Every writable control, with what is driving it.</summary>
+    /// <summary>Whether the configuration names no fans at all.</summary>
+    [ObservableProperty]
+    public partial bool IsEmpty { get; private set; }
+
+    /// <summary>The fans in the configuration, with what is driving each.</summary>
     public ObservableCollection<ControlCardViewModel> Controls { get; } = [];
 
-    /// <summary>The curves a control can be pointed at.</summary>
+    /// <summary>The curves a fan can be pointed at.</summary>
     public ObservableCollection<CurveChoice> Curves { get; } = [];
+
+    /// <summary>Fans the engine can see that are not in the configuration.</summary>
+    public ObservableCollection<AvailableFan> Available { get; } = [];
+
+    /// <inheritdoc />
+    public override async Task LoadAsync(CancellationToken cancellationToken = default)
+    {
+        await base.LoadAsync(cancellationToken).ConfigureAwait(true);
+
+        Connection.PluginsChanged += OnPluginsChanged;
+
+        await RefreshPluginNamesAsync().ConfigureAwait(true);
+    }
+
+    /// <inheritdoc />
+    protected override void OnDisposing()
+    {
+        Connection.PluginsChanged -= OnPluginsChanged;
+
+        foreach (var card in _cards.Values)
+        {
+            // AsTask, because a discarded ValueTask is a bug waiting to happen and the analyser is
+            // right to say so. There is nothing here to await against - the page is going away.
+            _ = card.DisposeAsync().AsTask();
+        }
+
+        _cards.Clear();
+    }
 
     /// <inheritdoc />
     protected override void OnSnapshot(EngineSnapshot snapshot)
@@ -79,6 +133,7 @@ public sealed partial class DashboardViewModel(EngineConnection connection)
         }
 
         Rebuild(snapshot);
+        _ = RefreshPluginNamesAsync();
     }
 
     /// <inheritdoc />
@@ -101,8 +156,30 @@ public sealed partial class DashboardViewModel(EngineConnection connection)
 
             card.Apply(reading, rpm);
         }
+    }
 
-        HottestTemperature = Hottest(tick);
+    /// <summary>
+    /// Adds a fan to the configuration, not driven yet.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately without a curve, so adding a fan never starts writing to it. It appears as a
+    /// card saying it is not driven, and picking a curve is the deliberate second step that starts
+    /// it — which is the same step that makes it eligible for a plugin.
+    /// </remarks>
+    [RelayCommand]
+    private async Task AddFanAsync(AvailableFan fan)
+    {
+        if (fan.Id.IsNone)
+        {
+            return;
+        }
+
+        await SaveAsync(new ControlBindingDefinition
+        {
+            ControlId = fan.Id,
+            CurveId = CurveId.None,
+            Enabled = false,
+        }).ConfigureAwait(true);
     }
 
     /// <summary>
@@ -115,42 +192,66 @@ public sealed partial class DashboardViewModel(EngineConnection connection)
     /// </remarks>
     private void Rebuild(EngineSnapshot snapshot)
     {
-        var bindings = snapshot.Configuration.Controls.ToDictionary(binding => binding.ControlId);
-        var present = new HashSet<SensorId>();
+        var present = snapshot.Controls.ToDictionary(descriptor => descriptor.Id);
+        var configured = new HashSet<SensorId>();
 
         Controls.Clear();
 
-        foreach (var descriptor in snapshot.Controls)
+        foreach (var binding in snapshot.Configuration.Controls)
         {
-            present.Add(descriptor.Id);
+            configured.Add(binding.ControlId);
 
-            var binding = bindings.GetValueOrDefault(descriptor.Id)
-                ?? new ControlBindingDefinition { ControlId = descriptor.Id };
+            var descriptor = present.GetValueOrDefault(binding.ControlId);
 
-            var curveName = NameOf(binding.CurveId);
-
-            if (_cards.TryGetValue(descriptor.Id, out var existing))
+            if (_cards.TryGetValue(binding.ControlId, out var existing))
             {
-                existing.Rebind(binding, curveName);
-                existing.Apply(
-                    new ControlReading(descriptor.Id, descriptor.CommandedDuty, descriptor.Owner),
-                    null);
+                existing.Rebind(binding, Curves);
+
+                if (descriptor is not null)
+                {
+                    existing.Apply(
+                        new ControlReading(
+                            descriptor.Id,
+                            descriptor.CommandedDuty,
+                            descriptor.Owner,
+                            descriptor.ClaimantId),
+                        null);
+                }
 
                 Controls.Add(existing);
                 continue;
             }
 
-            var card = new ControlCardViewModel(descriptor, binding, curveName, Connection, SaveAsync);
-            _cards[descriptor.Id] = card;
+            var card = new ControlCardViewModel(
+                descriptor,
+                binding,
+                Curves,
+                Connection,
+                SaveAsync,
+                NameClaimant);
+
+            _cards[binding.ControlId] = card;
             Controls.Add(card);
         }
 
-        // A control the engine no longer reports is dropped rather than left as a stale card for a
-        // fan that is not there.
-        foreach (var id in _cards.Keys.Where(id => !present.Contains(id)).ToList())
+        // A card for a binding that is no longer in the configuration is dropped, and its writer
+        // with it — otherwise a removed fan keeps a rate limiter alive for the life of the window.
+        foreach (var id in _cards.Keys.Where(id => !configured.Contains(id)).ToList())
         {
-            _cards.Remove(id);
+            if (_cards.Remove(id, out var stale))
+            {
+                _ = stale.DisposeAsync().AsTask();
+            }
         }
+
+        Available.Clear();
+
+        foreach (var descriptor in snapshot.Controls.Where(control => !configured.Contains(control.Id)))
+        {
+            Available.Add(new AvailableFan(descriptor.Id, descriptor.Name, descriptor.HardwareName));
+        }
+
+        IsEmpty = Controls.Count == 0;
     }
 
     /// <summary>
@@ -197,50 +298,41 @@ public sealed partial class DashboardViewModel(EngineConnection connection)
         }
     }
 
-    private string NameOf(CurveId id)
-    {
-        if (id.IsNone)
-        {
-            return "No curve";
-        }
-
-        foreach (var curve in Curves)
-        {
-            if (curve.Id == id)
-            {
-                return curve.Name;
-            }
-        }
-
-        // The configuration names a curve that is not in it. The validator reports this as an
-        // error, so the card says so rather than showing a blank where a name should be.
-        return "Missing curve";
-    }
-
     /// <summary>
-    /// The hottest temperature this tick.
+    /// Turns a claimant id into something worth showing a person.
     /// </summary>
     /// <remarks>
-    /// Temperatures only. A maximum across every reading would report a fan's RPM as the hottest
-    /// thing in the machine, which is both wrong and briefly alarming.
+    /// Resolved here rather than by the engine, so a tick carries an id and nothing more. The map
+    /// is small, changes only when the user changes something, and the fallback is the id itself —
+    /// which is at least searchable.
     /// </remarks>
-    private string Hottest(TickSnapshot tick)
+    private string? NameClaimant(string? claimantId) =>
+        claimantId is null ? null : _pluginNames.GetValueOrDefault(claimantId, claimantId);
+
+    private async Task RefreshPluginNamesAsync()
     {
-        if (Snapshot is not { } snapshot)
+        if (Connection.Engine is not { } engine)
         {
-            return "—";
+            return;
         }
 
-        var temperatures = snapshot.Sensors
-            .Where(sensor => sensor.Kind == SensorKind.Temperature)
-            .Select(sensor => sensor.Id)
-            .ToHashSet();
+        try
+        {
+            var plugins = await engine.ListPluginsAsync().ConfigureAwait(true);
 
-        var readings = tick.Sensors
-            .Where(reading => reading.Value is not null && temperatures.Contains(reading.Id))
-            .Select(reading => reading.Value!.Value)
-            .ToList();
+            _pluginNames.Clear();
 
-        return readings.Count == 0 ? "—" : $"{readings.Max():0.#} °C";
+            foreach (var plugin in plugins)
+            {
+                _pluginNames[plugin.Id] = plugin.DisplayName;
+            }
+        }
+        catch (Exception)
+        {
+            // A card falling back to a manifest id is a cosmetic loss, and not one worth putting an
+            // error on the page for.
+        }
     }
+
+    private void OnPluginsChanged(object? sender, EventArgs e) => _ = RefreshPluginNamesAsync();
 }

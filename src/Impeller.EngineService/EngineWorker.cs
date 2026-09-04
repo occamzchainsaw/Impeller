@@ -118,10 +118,16 @@ public sealed partial class EngineWorker(
             .ToArray();
 
         var controls = registry.Controls
-            .Select(control => new ControlReading(
-                control.Id,
-                result.CommandedDuties.TryGetValue(control.Id, out var duty) ? duty : control.CommandedDuty,
-                ownership.GetOwner(control.Id).Kind))
+            .Select(control =>
+            {
+                var owner = ownership.GetOwner(control.Id);
+
+                return new ControlReading(
+                    control.Id,
+                    result.CommandedDuties.TryGetValue(control.Id, out var duty) ? duty : control.CommandedDuty,
+                    owner.Kind,
+                    owner.ClaimantId);
+            })
             .ToArray();
 
         notifications.RaiseTick(new TickSnapshot(TickCount, now, sensors, controls));

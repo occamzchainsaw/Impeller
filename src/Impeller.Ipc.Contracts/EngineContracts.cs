@@ -112,7 +112,21 @@ public readonly record struct SensorReading(SensorId Id, float? Value);
 /// <param name="Id">Which control.</param>
 /// <param name="CommandedDuty">The duty standing at it.</param>
 /// <param name="Owner">What sort of claimant is driving it.</param>
-public readonly record struct ControlReading(SensorId Id, Duty? CommandedDuty, ControlOwnerKind Owner);
+/// <param name="ClaimantId">
+/// Which specific claimant, where that means anything - a plugin's manifest id, or the shell's own
+/// name for a manual pin. Null for a curve-driven control, which is most of them most of the time.
+/// </param>
+/// <remarks>
+/// The claimant travels on every tick rather than only in a snapshot, because ownership changes
+/// between snapshots and a card that could only say "a plugin" without saying which would send the
+/// user hunting. It is a nullable string that is null in the ordinary case, which is the cheapest
+/// thing that could carry it.
+/// </remarks>
+public readonly record struct ControlReading(
+    SensorId Id,
+    Duty? CommandedDuty,
+    ControlOwnerKind Owner,
+    string? ClaimantId);
 
 /// <summary>
 /// What changed on one tick.

@@ -102,7 +102,10 @@ public class ThrottledWriterTests
                 writer.Write(value);
             }
 
-            await AdvanceUntil(time, () => sent.Count == 2);
+            // Stated as "ends on 60", not "the second send is 60". The pump runs on the thread pool
+            // and can take a value mid-loop, so how many sends happen is genuinely unspecified -
+            // where the fan finishes is not.
+            await AdvanceUntil(time, () => sent.Count > 0 && sent[^1] == 60f);
 
             Assert.Equal(60f, sent[^1]);
         }
