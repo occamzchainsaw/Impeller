@@ -587,8 +587,7 @@ public sealed class PluginSession : IPluginHost, IAsyncDisposable
                 PluginAcquireFailure.AlreadyOwned => "Something else is holding this fan.",
 
                 PluginAcquireFailure.NotDriven =>
-                    "Impeller is not driving this fan — it needs to be switched on and given a "
-                    + "curve before a plugin can take it over.",
+                    "Impeller is not driving this fan. Switch it on in Impeller first.",
                 PluginAcquireFailure.EngineUnavailable =>
                     "Impeller is in a failsafe state and is granting nothing.",
                 _ => "Impeller refused the claim.",

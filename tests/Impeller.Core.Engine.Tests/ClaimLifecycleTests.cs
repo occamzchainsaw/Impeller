@@ -222,10 +222,12 @@ public class ClaimLifecycleTests
     }
 
     [Fact]
-    public void A_control_with_nothing_behind_it_holds_rather_than_guessing()
+    public void A_control_with_nothing_behind_it_rests_rather_than_freezing()
     {
-        // The other half of the rule. With no curve there is no better answer sitting behind the
-        // silence, and moving a fan to a number nobody chose is worse than leaving it alone.
+        // This used to hold the last duty, on the reasoning that moving a fan to a number nobody
+        // chose is worse than leaving it. That was wrong in the other direction: it left the fan at
+        // a number nobody chose either - the departed claimant's - for as long as the machine
+        // stayed on. A defined resting state is the answer to both. See RestingStateTests.
         var harness = new Harness();
         harness.Configure(withCurve: false);
 
@@ -239,7 +241,10 @@ public class ClaimLifecycleTests
         harness.Ownership.ForceRelease(harness.FanId, OwnershipChangeReason.Revoked);
         harness.Loop.Tick(Tick);
 
-        Assert.Equal(35f, harness.Commanded, precision: 3);
+        // This fan cannot be handed back to firmware, so it takes the other half of the resting
+        // rule: its failsafe duty, which is the value the engine already uses whenever it has to
+        // leave a fan somewhere safe without knowing what it should be doing.
+        Assert.Equal(100f, harness.Commanded, precision: 3);
     }
 
     [Fact]
@@ -258,18 +263,16 @@ public class ClaimLifecycleTests
     }
 
     [Fact]
-    public void A_plugin_cannot_claim_a_control_with_no_curve_to_fall_back_to()
+    public void A_plugin_may_claim_a_control_with_no_curve()
     {
-        // The curve is what the fan returns to when the plugin lets go or dies. Without one the
-        // plugin is the only thing between the fan and a stopped fan, and its process dying becomes
-        // a cooling failure rather than a fan going back to what it was doing.
+        // Refused, once. The reasoning was that a curve is what the fan returns to when the plugin
+        // lets go, and without one the plugin was the only thing between the fan and a stopped fan.
+        // Every enabled control now has a resting state, so the reason is gone - and the rule was
+        // inconsistent while it stood, because a person could pin exactly the same fan by hand.
         var harness = new Harness();
         harness.Configure(withCurve: false);
 
-        var result = harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, PluginA);
-
-        Assert.False(result.Succeeded);
-        Assert.Equal(ControlAcquireFailure.NotDriven, result.Failure);
+        Assert.True(harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, PluginA).Succeeded);
     }
 
     [Fact]
@@ -341,15 +344,17 @@ public class ClaimLifecycleTests
     }
 
     [Fact]
-    public void A_plugin_holding_a_fan_whose_curve_is_taken_away_is_taken_off_it_too()
+    public void A_plugin_keeps_a_fan_whose_curve_is_taken_away()
     {
+        // This used to evict the plugin, because a curveless fan was one no plugin could hold. It
+        // no longer is: taking the curve away leaves the fan resting when the plugin lets go, which
+        // is a defined state, so there is nothing to protect the user from by taking it back.
         var harness = new Harness();
         harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, PluginA);
 
         harness.Configure(withCurve: false);
 
-        Assert.Equal(ControlOwnerKind.Curve, harness.Ownership.GetOwner(harness.FanId).Kind);
-        Assert.Equal(OwnershipChangeReason.ConfigurationChanged, harness.LastReason);
+        Assert.Equal(ControlOwnerKind.Plugin, harness.Ownership.GetOwner(harness.FanId).Kind);
     }
 
     [Fact]

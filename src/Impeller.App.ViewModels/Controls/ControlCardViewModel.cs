@@ -432,7 +432,7 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
         // Says what to do about it. This refusal exists precisely so that switching a fan off and
         // then wondering why the slider does nothing stops being a silent failure, and answering it
         // with "the engine refused" would give back the silence in a different font.
-        ControlAcquireFailure.NotDriven => "Impeller is not driving it — give it a curve first.",
+        ControlAcquireFailure.NotDriven => "Impeller is not driving it — switch it on first.",
         ControlAcquireFailure.NotPermitted => "it has not been granted to this program.",
         _ => "the engine refused.",
     };

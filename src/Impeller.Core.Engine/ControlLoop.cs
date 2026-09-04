@@ -60,6 +60,14 @@ public sealed class ControlLoop
 
     private readonly Lock _requestGate = new();
     private readonly Dictionary<SensorId, RequestedDuty> _requestedDuties = [];
+
+    /// <summary>Controls currently handed back because nothing is driving them.</summary>
+    /// <remarks>
+    /// Remembered so the handover happens once. Calling into the firmware every tick would be
+    /// pointless traffic on a chip that is slow to write, and on hardware that answers a restore
+    /// with a fresh default it would fight anything the firmware then did.
+    /// </remarks>
+    private readonly HashSet<SensorId> _resting = [];
     private readonly Dictionary<SensorId, Duty> _commandedDuties = [];
 
     private IReadOnlyList<IFanCurve> _orderedCurves = [];
@@ -94,6 +102,10 @@ public sealed class ControlLoop
     {
         ArgumentNullException.ThrowIfNull(curves);
         ArgumentNullException.ThrowIfNull(bindings);
+
+        // A control that was resting may now have a curve, and one that had a curve may not. The
+        // handover happens once per rest, so the record of it has to go when the rules change.
+        _resting.Clear();
 
         // Bindings first: the sort needs to know which curve drives which control before it can
         // follow a sync curve's control edge back to the curve behind it.
@@ -252,19 +264,23 @@ public sealed class ControlLoop
             : SensorId.None;
 
     /// <summary>
-    /// Whether a plugin may hold this control: the engine drives it, and it has a curve to fall
-    /// back to when the plugin lets go or dies.
+    /// Whether a plugin may hold this control: the engine drives it.
     /// </summary>
     /// <remarks>
-    /// The curve requirement is what makes a plugin claim safe to lose. Without one there is no
-    /// state to return to, and the plugin would be the only thing standing between the fan and a
-    /// stopped fan - so a process dying would be a cooling failure rather than a fan going back to
-    /// its curve. A manual pin is held to the weaker rule on purpose: it is written into the
-    /// configuration and restored on the next start, so a permanent pin with no curve is a
-    /// configuration the engine supports and a user reasonably wants.
+    /// <para>
+    /// This used to require a curve as well, because a curve was the only defined thing for a fan
+    /// to return to when a plugin let go or died - without one the tick loop held the last duty
+    /// forever, and the plugin was the only thing standing between the fan and whatever number it
+    /// had last chosen.
+    /// </para>
+    /// <para>
+    /// <see cref="Rest"/> removed that. Every enabled control now has somewhere to go when nothing
+    /// is driving it, so the rule collapses to the one it always should have been. It was also
+    /// inconsistent while it lasted: a user could pin a curveless fan by hand, which is exactly the
+    /// state a plugin was being refused permission to create.
+    /// </para>
     /// </remarks>
-    public bool CanBeHeldByPlugin(SensorId controlId) =>
-        _bindings.TryGetValue(controlId, out var binding) && binding.Enabled && !binding.CurveId.IsNone;
+    public bool CanBeHeldByPlugin(SensorId controlId) => IsDriven(controlId);
 
     /// <summary>
     /// Takes a control on a claimant's behalf, refusing when this configuration cannot honour it.
@@ -367,6 +383,7 @@ public sealed class ControlLoop
     {
         _failsafeEngaged = true;
         _ownership.SuspendGrants();
+        _resting.Clear();
 
         var written = 0;
         var faults = new Dictionary<SensorId, Exception>();
@@ -428,6 +445,7 @@ public sealed class ControlLoop
         }
 
         _failsafeEngaged = false;
+        _resting.Clear();
         _ownership.ResumeGrants();
     }
 
@@ -467,8 +485,22 @@ public sealed class ControlLoop
 
             if (ResolveTarget(binding, curveOutputs) is not { } target)
             {
+                // A control with a curve that momentarily says nothing holds its last duty - a
+                // sensor that stopped reporting for one tick is not a reason to move a fan. A
+                // control with no curve at all is a different thing: there is nothing for it to
+                // fall back to, ever, so rather than freezing at whatever the last owner left on
+                // it, it goes to a resting state that is actually defined.
+                if (binding.CurveId.IsNone
+                    && _ownership.GetOwner(binding.ControlId).IsCurve
+                    && Rest(binding, control, faults))
+                {
+                    written++;
+                }
+
                 continue;
             }
+
+            _resting.Remove(binding.ControlId);
 
             var current = _commandedDuties.TryGetValue(binding.ControlId, out var last)
                 ? last
@@ -541,6 +573,52 @@ public sealed class ControlLoop
         }
 
         return outputs;
+    }
+
+    /// <summary>
+    /// Puts a control with nothing driving it into a defined resting state.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Handed back to its own firmware where the hardware can do that, which is the honest answer:
+    /// Impeller is not driving this fan, so the thing that was driving it before Impeller existed
+    /// should have it back. Where it cannot, the binding's failsafe duty applies - the same value
+    /// used whenever the engine has to leave a fan somewhere safe without knowing what it should be
+    /// doing.
+    /// </para>
+    /// <para>
+    /// The alternative, and what this replaces, was to hold the last commanded duty forever. That
+    /// left a fan parked at whatever number some plugin chose before it exited, with nothing
+    /// managing it and no way for the user to tell that had happened.
+    /// </para>
+    /// </remarks>
+    /// <returns>Whether a duty was written.</returns>
+    private bool Rest(ControlBinding binding, IControl control, Dictionary<SensorId, Exception> faults)
+    {
+        if (!_resting.Add(binding.ControlId))
+        {
+            return false;
+        }
+
+        if (control.SupportsAutomaticMode && control.TryRestoreAutomaticMode())
+        {
+            // The firmware has it now, so the engine no longer knows what duty is standing at it -
+            // and reporting a stale number would be worse than reporting none.
+            _commandedDuties.Remove(binding.ControlId);
+            return false;
+        }
+
+        try
+        {
+            control.Write(binding.FailsafeDuty);
+            _commandedDuties[binding.ControlId] = binding.FailsafeDuty;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            faults[binding.ControlId] = ex;
+            return false;
+        }
     }
 
     /// <summary>

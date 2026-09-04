@@ -34,7 +34,7 @@ public sealed partial class GrantedFanViewModel(SensorId id, string name, bool g
     /// <summary>Why it cannot be granted, or null when it can.</summary>
     public string? Obstacle { get; } = claimable
         ? null
-        : "Impeller is not driving this fan — switch it on and give it a curve first.";
+        : "Impeller is not driving this fan — switch it on in the Dashboard first.";
 }
 
 /// <summary>

@@ -167,23 +167,23 @@ public sealed class PluginHostTests
 
         Assert.False(outcome.Granted);
         Assert.Equal(PluginAcquireFailure.NotDriven, outcome.Failure);
-        Assert.Contains("switched on", outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("Switch it on", outcome.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task A_fan_with_no_curve_to_fall_back_to_is_refused_as_not_driven()
+    public async Task A_fan_with_no_curve_can_still_be_claimed()
     {
-        // The curve is what makes a plugin claim safe to lose. Without one the plugin would be the
-        // only thing standing between the fan and a stopped fan.
+        // Refused until the engine learned to rest a curveless fan instead of freezing it. The
+        // curve was standing in for "somewhere safe to go"; now every enabled control has one.
         await using var rig = new Rig();
         rig.Configure(withCurve: false);
 
         await using var plug = rig.Connect();
         await rig.AdmitAndGrantAsync(plug);
 
-        Assert.Equal(
-            PluginAcquireFailure.NotDriven,
-            (await plug.Engine.AcquireAsync(rig.FanRef)).Failure);
+        var outcome = await plug.Engine.AcquireAsync(rig.FanRef);
+
+        Assert.True(outcome.Granted, outcome.Message);
     }
 
     [Fact]
