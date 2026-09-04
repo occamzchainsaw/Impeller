@@ -695,11 +695,14 @@ public sealed class PluginHostTests
                 new PluginStore(Path.Combine(_root, StateLocation.PluginsName)),
                 TimeProvider.System);
 
+            Names = new JsonSensorNames(Path.Combine(_root, StateLocation.NamesName));
+
             Host = new PluginHost(
                 Registry,
                 Loop,
                 Ownership,
                 Plugins,
+                Names,
                 "1.0.0-test",
                 TimeProvider.System,
                 options);
@@ -720,6 +723,9 @@ public sealed class PluginHostTests
         public ControlLoop Loop { get; }
 
         public PluginRegistry Plugins { get; }
+
+        /// <summary>The user's names for this machine's fans, which plugins are shown.</summary>
+        public JsonSensorNames Names { get; }
 
         public PluginHost Host { get; }
 

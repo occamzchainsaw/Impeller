@@ -34,6 +34,10 @@ public sealed record EngineStatus(
 /// <summary>A sensor as the shell needs to show it.</summary>
 /// <param name="Id">Stable identity, and the only thing a configuration stores.</param>
 /// <param name="Name">Provider-supplied name, on its own. Not unique, not identity.</param>
+/// <param name="DisplayName">
+/// What to show: the name the user gave it, or <paramref name="Name"/> when they have not given
+/// one. Resolved by the engine so every surface agrees, including plugins.
+/// </param>
 /// <param name="HardwareName">
 /// What it belongs to, for example <c>Nuvoton NCT6687D</c>. Kept separate from the name so a
 /// surface that already says which hardware it is showing does not print it twice.
@@ -48,6 +52,7 @@ public sealed record EngineStatus(
 public sealed record SensorDescriptor(
     SensorId Id,
     string Name,
+    string DisplayName,
     string HardwareName,
     SensorKind Kind,
     string ProviderId,
@@ -57,6 +62,7 @@ public sealed record SensorDescriptor(
 /// <summary>A writable control, with whatever is currently driving it.</summary>
 /// <param name="Id">Stable identity.</param>
 /// <param name="Name">Provider-supplied name, on its own.</param>
+/// <param name="DisplayName">The user's name for it, or the provider's when they have not given one.</param>
 /// <param name="HardwareName">What it belongs to, kept separate from the name.</param>
 /// <param name="ProviderId">Which backend produced it.</param>
 /// <param name="HardwarePath">Diagnostic rendering of the fingerprint.</param>
@@ -77,6 +83,7 @@ public sealed record SensorDescriptor(
 public sealed record ControlDescriptor(
     SensorId Id,
     string Name,
+    string DisplayName,
     string HardwareName,
     string ProviderId,
     string HardwarePath,
@@ -382,6 +389,20 @@ public interface IEngineControl
     /// by connecting, where a disabled one cannot until the user says so.
     /// </remarks>
     Task<bool> ForgetPluginAsync(string pluginId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gives a sensor or fan the user's own name, or clears it.
+    /// </summary>
+    /// <param name="sensorId">Which one.</param>
+    /// <param name="name">What to call it. Null or blank restores the provider's own name.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <remarks>
+    /// Stored against this machine rather than in the configuration, so it survives switching
+    /// profiles and does not travel when one is copied elsewhere. Nothing keys off a name, so
+    /// renaming can never break a binding.
+    /// </remarks>
+    /// <returns>False when nothing changed.</returns>
+    Task<bool> RenameAsync(SensorId sensorId, string? name, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

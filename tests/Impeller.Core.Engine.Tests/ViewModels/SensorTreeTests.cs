@@ -20,7 +20,7 @@ public class SensorTreeTests
         SensorKind kind,
         string path,
         float? value = 40f) =>
-        new(SensorId.New(), name, hardware, kind, "lhm", path, value);
+        new(SensorId.New(), name, name, hardware, kind, "lhm", path, value);
 
     private static List<SensorDescriptor> Machine() =>
     [

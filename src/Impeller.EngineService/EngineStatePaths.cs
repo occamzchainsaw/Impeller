@@ -29,4 +29,7 @@ public sealed record EngineStatePaths(string ConfigurationRoot, bool Portable)
     /// carry this machine's plugin approvals with it.
     /// </remarks>
     public string PluginsPath { get; init; } = StateLocation.ResolvePlugins(ConfigurationRoot);
+
+    /// <summary>The names the user gave this machine's fans and sensors.</summary>
+    public string NamesPath { get; init; } = StateLocation.ResolveNames(ConfigurationRoot);
 }

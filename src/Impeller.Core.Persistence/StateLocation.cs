@@ -28,6 +28,9 @@ public static class StateLocation
     /// <summary>The file recording which plugins have been seen and what they were granted.</summary>
     public const string PluginsName = "plugins.json";
 
+    /// <summary>The file holding the names the user gave this machine's sensors and fans.</summary>
+    public const string NamesName = "names.json";
+
     /// <summary>
     /// Works out the configuration folder, creating it if necessary.
     /// </summary>
@@ -168,6 +171,20 @@ public static class StateLocation
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(configurationRoot);
         return Beside(configurationRoot, PluginsName);
+    }
+
+    /// <summary>
+    /// The names the user gave this machine's fans and sensors.
+    /// </summary>
+    /// <remarks>
+    /// Beside the configurations for two reasons at once. Anything ending in <c>.json</c> inside
+    /// that folder is offered as a configuration to load; and a name describes this PC's hardware,
+    /// so it must survive switching profiles and must not travel when one is copied elsewhere.
+    /// </remarks>
+    public static string ResolveNames(string configurationRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(configurationRoot);
+        return Beside(configurationRoot, NamesName);
     }
 
     /// <summary>The path a file takes when it belongs next to the configuration folder, not inside it.</summary>

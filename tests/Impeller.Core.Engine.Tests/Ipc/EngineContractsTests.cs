@@ -268,6 +268,39 @@ public sealed class EngineContractsTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task A_rename_arrives_with_the_name_the_user_typed()
+    {
+        Assert.True(await Engine.RenameAsync(FakeEngine.FanControl, "Seat blower"));
+
+        var rename = Assert.NotNull(_engine.LastRename);
+
+        Assert.Equal(FakeEngine.FanControl, rename.Id);
+        Assert.Equal("Seat blower", rename.Name);
+    }
+
+    [Fact]
+    public async Task Clearing_a_name_crosses_the_wire_as_null_rather_than_as_an_empty_string()
+    {
+        // Null is the removal. An empty string arriving as "" would be a name of no characters,
+        // and the difference decides whether the fan goes back to being called "Fan #4".
+        await Engine.RenameAsync(FakeEngine.FanControl, null);
+
+        Assert.Null(Assert.NotNull(_engine.LastRename).Name);
+    }
+
+    [Fact]
+    public async Task A_display_name_survives_the_trip_to_the_shell()
+    {
+        var snapshot = await Engine.GetSnapshotAsync();
+
+        // Both halves travel: what the user calls it, and what the hardware does - the second being
+        // the only route back once the first has been set.
+        Assert.Equal("Seat blower", snapshot.Controls[0].DisplayName);
+        Assert.Equal("Fan #4", snapshot.Controls[0].Name);
+        Assert.Equal("CPU Package", snapshot.Sensors[0].DisplayName);
+    }
+
+    [Fact]
     public async Task A_change_to_the_plugins_reaches_the_shell()
     {
         await _engine.Events!.OnPluginsChangedAsync();
@@ -342,12 +375,13 @@ public sealed class EngineContractsTests : IAsyncDisposable
             new EngineStatus("0.1.0", 1234, DateTimeOffset.UnixEpoch, false, @"C:\ProgramData\Impeller"),
             [
                 new SensorDescriptor(
-                    CpuSensor, "CPU Package", "AMD Ryzen 7 9800X3D", SensorKind.Temperature,
-                    "lhm", "lhm/amdcpu/0/temperature/2", 61.5f),
+                    CpuSensor, "CPU Package", "CPU Package", "AMD Ryzen 7 9800X3D",
+                    SensorKind.Temperature, "lhm", "lhm/amdcpu/0/temperature/2", 61.5f),
             ],
             [
                 new ControlDescriptor(
-                    FanControl, "Fan #4", "Nuvoton NCT6687D", "lhm", "lhm/lpc/nct6687d/0/control/4",
+                    FanControl, "Fan #4", "Seat blower", "Nuvoton NCT6687D", "lhm",
+                    "lhm/lpc/nct6687d/0/control/4",
                     new Duty(55f), false, ControlOwnerKind.Curve, null, Claimable: true),
             ],
             "Default",
@@ -550,6 +584,18 @@ public sealed class EngineContractsTests : IAsyncDisposable
         public Task<bool> ForgetPluginAsync(
             string pluginId,
             CancellationToken cancellationToken = default) => Task.FromResult(true);
+
+        /// <summary>What the last rename carried, so the arguments can be checked too.</summary>
+        public (SensorId Id, string? Name)? LastRename { get; private set; }
+
+        public Task<bool> RenameAsync(
+            SensorId sensorId,
+            string? name,
+            CancellationToken cancellationToken = default)
+        {
+            LastRename = (sensorId, name);
+            return Task.FromResult(true);
+        }
     }
 
     /// <summary>A shell that records what the engine pushed at it.</summary>

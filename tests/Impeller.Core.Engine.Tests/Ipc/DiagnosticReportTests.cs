@@ -36,16 +36,17 @@ public class DiagnosticReportTests
         Sensors =
         [
             new SensorDescriptor(
-                SensorId.New(), "CPU Package", "AMD Ryzen 7 9800X3D", SensorKind.Temperature,
-                "lhm", "/amdcpu/0/temperature/2", 62.5f),
+                SensorId.New(), "CPU Package", "CPU Package", "AMD Ryzen 7 9800X3D",
+                SensorKind.Temperature, "lhm", "/amdcpu/0/temperature/2", 62.5f),
             new SensorDescriptor(
-                SensorId.New(), "Fan #1", "Nuvoton NCT6687D", SensorKind.FanSpeed,
-                "lhm", "/lpc/nct6687d/0/fan/0", null),
+                SensorId.New(), "Fan #1", "Seat blower", "Nuvoton NCT6687D",
+                SensorKind.FanSpeed, "lhm", "/lpc/nct6687d/0/fan/0", null),
         ],
         Controls =
         [
             new ControlDescriptor(
                 SensorId.New(),
+                "CPU Fan",
                 "CPU Fan",
                 "Nuvoton NCT6687D",
                 "lhm",

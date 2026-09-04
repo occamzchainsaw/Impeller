@@ -1,5 +1,9 @@
-using Impeller.App.ViewModels;
+﻿using Impeller.App.ViewModels;
+using Impeller.App.ViewModels.Sensors;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Windows.System;
 
 namespace Impeller.App.Shell.Pages;
 
@@ -22,6 +26,49 @@ public sealed partial class SensorsPage : Page
 
     /// <summary>The page's view model, pulled from the container because WinUI builds pages itself.</summary>
     public SensorsViewModel ViewModel { get; } = App.GetService<SensorsViewModel>();
+
+    /// <summary>What the hardware calls it and where it lives, for a tooltip.</summary>
+    public static string Where(string fullName, string path) =>
+        fullName + System.Environment.NewLine + path;
+
+    /// <summary>Notes that the user is typing, so a refresh does not overwrite them.</summary>
+    private void OnNameFocused(object sender, RoutedEventArgs e)
+    {
+        if (sender is TextBox { DataContext: SensorItemViewModel item })
+        {
+            item.IsRenaming = true;
+        }
+    }
+
+    /// <summary>Commits on Enter, abandons on Escape.</summary>
+    private async void OnNameKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (sender is not TextBox { DataContext: SensorItemViewModel item } box)
+        {
+            return;
+        }
+
+        if (e.Key == VirtualKey.Enter)
+        {
+            e.Handled = true;
+            await item.RenameCommand.ExecuteAsync(null);
+        }
+        else if (e.Key == VirtualKey.Escape)
+        {
+            e.Handled = true;
+            item.IsRenaming = false;
+            box.Text = item.Name;
+        }
+    }
+
+    /// <summary>Commits when the field is left.</summary>
+    private async void OnNameCommitted(object sender, RoutedEventArgs e)
+    {
+        if (sender is TextBox { DataContext: SensorItemViewModel item })
+        {
+            await item.RenameCommand.ExecuteAsync(null);
+        }
+    }
 
     /// <summary>How many rows survived the search, so an empty page says why it is empty.</summary>
     public static string Showing(int count) =>

@@ -6,6 +6,7 @@ using Impeller.Core.Abstractions.Configuration;
 using Impeller.Core.Engine;
 using Impeller.Core.Engine.Configuration;
 using Impeller.Core.Engine.Tuning;
+using Impeller.Core.Persistence;
 using Impeller.Core.Persistence.Diagnostics;
 using Impeller.Core.Persistence.Legacy;
 using Impeller.Ipc.Contracts;
@@ -40,6 +41,7 @@ public sealed class EngineRpcService(
     TuningCoordinator tuning,
     EngineNotifications notifications,
     ISensorIdentityMap identityMap,
+    JsonSensorNames names,
     PluginRegistry plugins,
     PluginHost pluginHost) : IEngineControl
 {
@@ -253,6 +255,11 @@ public sealed class EngineRpcService(
         // nothing to fix.
         coordinator.Save(configuration);
 
+        // The names the user had in the app they are leaving. Seeded rather than assigned, so an
+        // import never overwrites something they have already named here - and a migrated setup
+        // arrives with their own labels on it rather than "System Fan #4" everywhere.
+        names.Seed(imported.Names);
+
         return Task.FromResult(new ImportSummary(
             true,
             configuration.Name,
@@ -426,6 +433,24 @@ public sealed class EngineRpcService(
         CancellationToken cancellationToken = default) =>
         Task.FromResult(plugins.Forget(pluginId));
 
+    /// <inheritdoc />
+    public Task<bool> RenameAsync(
+        SensorId sensorId,
+        string? name,
+        CancellationToken cancellationToken = default)
+    {
+        if (!names.SetName(sensorId, name))
+        {
+            return Task.FromResult(false);
+        }
+
+        // Reuses the hardware-changed signal rather than adding one of its own: from a client's
+        // side both mean the same thing, that the snapshot it is holding no longer describes the
+        // machine. Every shell already re-reads on it.
+        notifications.RaiseHardwareChanged();
+        return Task.FromResult(true);
+    }
+
     /// <summary>One stored plugin record, plus the two things about it that are not stored.</summary>
     private PluginSummary Summarise(PluginRecord record) => new(
         record.Id,
@@ -483,9 +508,10 @@ public sealed class EngineRpcService(
         loop.IsFailsafeEngaged,
         paths.ConfigurationRoot);
 
-    private static SensorDescriptor Describe(ISensor sensor) => new(
+    private SensorDescriptor Describe(ISensor sensor) => new(
         sensor.Id,
         sensor.Name,
+        names.Resolve(sensor.Id, sensor.Name),
         sensor.HardwareName,
         sensor.Kind,
         sensor.Fingerprint.ProviderId,
@@ -499,6 +525,7 @@ public sealed class EngineRpcService(
         return new ControlDescriptor(
             control.Id,
             control.Name,
+            names.Resolve(control.Id, control.Name),
             control.HardwareName,
             control.Fingerprint.ProviderId,
             control.Fingerprint.ToString(),

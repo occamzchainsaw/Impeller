@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Impeller.Core.Abstractions;
@@ -98,6 +98,7 @@ public sealed class FanControlConfigImporter(ISensorIdentityMap identityMap, ISe
                 Controls = [.. controls],
             },
             Notes = [.. session.Notes],
+            Names = session.Names,
         };
     }
 
@@ -442,6 +443,7 @@ public sealed class FanControlConfigImporter(ISensorIdentityMap identityMap, ISe
                 var nickname = Text(node, "NickName") ?? identifier ?? "Control";
 
                 var controlId = ResolveHardware(identifier, nickname, "control");
+                RecordName(controlId, Text(node, "NickName"));
                 if (controlId.IsNone)
                 {
                     // Already reported by ResolveHardware. Keeping a binding that names no control
@@ -712,6 +714,37 @@ public sealed class FanControlConfigImporter(ISensorIdentityMap identityMap, ISe
                       + "present here. Pick a replacement.");
 
             return SensorId.None;
+        }
+
+        /// <summary>The names the user gave things, where they are actually names.</summary>
+        public Dictionary<SensorId, string> Names { get; } = [];
+
+        /// <summary>
+        /// Keeps a nickname, but only when it says something the hardware does not.
+        /// </summary>
+        /// <remarks>
+        /// FanControl pre-fills a nickname with the provider's own name, so most of them carry no
+        /// decision at all. Storing those would turn every fan into a "renamed" one and would mask
+        /// a later firmware change behind a name nobody chose.
+        /// </remarks>
+        private void RecordName(SensorId id, string? nickname)
+        {
+            var wanted = nickname?.Trim();
+
+            if (id.IsNone || string.IsNullOrEmpty(wanted) || registry is null)
+            {
+                return;
+            }
+
+            var sensor = registry.Controls.FirstOrDefault(control => control.Id == id) as ISensor
+                ?? registry.Sensors.FirstOrDefault(entry => entry.Id == id);
+
+            if (sensor is null || string.Equals(sensor.Name, wanted, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            Names[id] = wanted;
         }
 
         /// <summary>

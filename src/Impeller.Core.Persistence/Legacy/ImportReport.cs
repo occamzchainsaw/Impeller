@@ -1,4 +1,4 @@
-using Impeller.Core.Abstractions.Configuration;
+﻿using Impeller.Core.Abstractions.Configuration;
 
 namespace Impeller.Core.Persistence.Legacy;
 
@@ -18,6 +18,18 @@ public sealed record ImportResult
 
     /// <summary>Everything worth saying about the import, in the order it was found.</summary>
     public EquatableArray<ImportNote> Notes { get; init; } = [];
+
+    /// <summary>
+    /// The names the user had given their fans in the app being left behind.
+    /// </summary>
+    /// <remarks>
+    /// Only where they differ from what the hardware calls the thing. FanControl pre-fills a
+    /// nickname with the provider's own name, so carrying all of them across would store a hundred
+    /// "custom" names identical to the defaults - and then a later firmware rename would be masked
+    /// by a name the user never chose.
+    /// </remarks>
+    public IReadOnlyDictionary<Impeller.Core.Abstractions.SensorId, string> Names { get; init; } =
+        new Dictionary<Impeller.Core.Abstractions.SensorId, string>();
 
     /// <summary>References that resolved to no sensor on this machine.</summary>
     public IEnumerable<ImportNote> Unresolved =>

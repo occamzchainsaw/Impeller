@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8" ?>
+﻿<?xml version="1.0" encoding="utf-8" ?>
 <Page
     x:Class="Impeller.App.Shell.Pages.SensorsPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -58,7 +58,18 @@
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
 
-                                            <TextBlock Text="{x:Bind Name}" ToolTipService.ToolTip="{x:Bind HardwarePath}" />
+                                            <!--  Editable in place: a temperature has no card to rename it from.  -->
+                                            <TextBox
+                                                Padding="0"
+                                                VerticalAlignment="Center"
+                                                Background="Transparent"
+                                                BorderThickness="0"
+                                                GotFocus="OnNameFocused"
+                                                KeyDown="OnNameKeyDown"
+                                                LostFocus="OnNameCommitted"
+                                                MaxLength="64"
+                                                Text="{x:Bind EditableName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                ToolTipService.ToolTip="{x:Bind local:SensorsPage.Where(FullName, HardwarePath)}" />
 
                                             <TextBlock
                                                 Grid.Column="1"

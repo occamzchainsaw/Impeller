@@ -105,6 +105,11 @@ builder.Services.AddSingleton<ConfigurationCoordinator>();
 builder.Services.AddSingleton<ISensorIdentityMap>(
     _ => new JsonSensorIdentityMap(statePaths.IdentityMapPath));
 
+// The user's own names for their fans. Machine state, beside the identity map for the same reason:
+// it describes this PC, so it must not travel with a configuration or vanish when one is switched.
+builder.Services.AddSingleton(new JsonSensorNames(statePaths.NamesPath));
+builder.Services.AddSingleton<ISensorNames>(sp => sp.GetRequiredService<JsonSensorNames>());
+
 builder.Services.Configure<LhmOptions>(builder.Configuration.GetSection(LhmOptions.SectionName));
 builder.Services.AddSingleton<ISensorProvider, LhmSensorProvider>();
 
@@ -142,6 +147,7 @@ builder.Services.AddSingleton(sp => new PluginHost(
     sp.GetRequiredService<ControlLoop>(),
     sp.GetRequiredService<ControlOwnershipRegistry>(),
     sp.GetRequiredService<PluginRegistry>(),
+    sp.GetRequiredService<ISensorNames>(),
     Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0",
     sp.GetRequiredService<TimeProvider>(),
     logger: sp.GetRequiredService<ILogger<PluginHost>>()));

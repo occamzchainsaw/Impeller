@@ -2,6 +2,8 @@
 using Impeller.App.ViewModels.Controls;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Windows.System;
 
 namespace Impeller.App.Shell.Pages;
 
@@ -54,9 +56,59 @@ public sealed partial class DashboardPage : Page
     /// <summary>The slider's position as a label.</summary>
     public static string Percent(float value) => $"{value:0}%";
 
-    /// <summary>Which piece of hardware a fan hangs off, for a tooltip rather than the card's face.</summary>
-    public static string Where(string hardware, string path) =>
-        string.IsNullOrWhiteSpace(hardware) ? path : $"{hardware}\n{path}";
+    /// <summary>
+    /// What the hardware calls this fan, and where it lives, for a tooltip.
+    /// </summary>
+    /// <remarks>
+    /// Carries the provider's own name as well, because once a fan has been called "seat blower"
+    /// the only route back to "System Fan #4" is for something to still say it.
+    /// </remarks>
+    public static string Where(string providerName, string hardware, string path)
+    {
+        var lines = new[] { providerName, hardware, path }
+            .Where(line => !string.IsNullOrWhiteSpace(line));
+
+        return string.Join('\n', lines);
+    }
+
+    /// <summary>Notes that the user is typing, so an arriving snapshot does not overwrite them.</summary>
+    private void OnNameFocused(object sender, RoutedEventArgs e)
+    {
+        if (sender is TextBox { DataContext: ControlCardViewModel card })
+        {
+            card.IsRenaming = true;
+        }
+    }
+
+    /// <summary>Commits on Enter, and abandons on Escape.</summary>
+    private async void OnNameKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (sender is not TextBox { DataContext: ControlCardViewModel card } box)
+        {
+            return;
+        }
+
+        if (e.Key == VirtualKey.Enter)
+        {
+            e.Handled = true;
+            await card.RenameCommand.ExecuteAsync(null);
+        }
+        else if (e.Key == VirtualKey.Escape)
+        {
+            e.Handled = true;
+            card.IsRenaming = false;
+            box.Text = card.Name;
+        }
+    }
+
+    /// <summary>Commits when the field is left, which is how most people finish typing.</summary>
+    private async void OnNameCommitted(object sender, RoutedEventArgs e)
+    {
+        if (sender is TextBox { DataContext: ControlCardViewModel card })
+        {
+            await card.RenameCommand.ExecuteAsync(null);
+        }
+    }
 
     /// <summary>
     /// Fills the Add a fan menu at the moment it opens.

@@ -318,7 +318,14 @@ public sealed class PluginSdkTests
                 new PluginStore(Path.Combine(_root, StateLocation.PluginsName)),
                 TimeProvider.System);
 
-            Host = new PluginHost(Registry, Loop, Ownership, Plugins, "1.0-test", TimeProvider.System);
+            Host = new PluginHost(
+                Registry,
+                Loop,
+                Ownership,
+                Plugins,
+                new JsonSensorNames(Path.Combine(_root, StateLocation.NamesName)),
+                "1.0-test",
+                TimeProvider.System);
 
             Client = new ImpellerClient(Manifest, new ImpellerClientOptions
             {

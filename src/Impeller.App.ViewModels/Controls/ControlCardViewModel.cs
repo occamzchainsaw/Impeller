@@ -69,11 +69,9 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
 
         Id = binding.ControlId;
         IsPresent = descriptor is not null;
-        Name = descriptor?.Name ?? "No longer present";
-        HardwareName = descriptor?.HardwareName ?? string.Empty;
         HardwarePath = descriptor?.HardwarePath ?? string.Empty;
 
-        Rebind(binding, curves);
+        Rebind(descriptor, binding, curves);
 
         // Where the slider starts. A stored pin is what the user last chose; otherwise the duty
         // standing now, so taking a fan by hand does not jolt it on the way.
@@ -90,11 +88,31 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
     /// <summary>Which control this is.</summary>
     public SensorId Id { get; }
 
-    /// <summary>What the hardware calls it, on its own.</summary>
-    public string Name { get; }
+    /// <summary>What to call it: the user's name, or the hardware's when they have not given one.</summary>
+    [ObservableProperty]
+    public partial string Name { get; private set; } = "No longer present";
+
+    /// <summary>
+    /// The name as the user is editing it.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="Name"/> so a half-typed name is never what the card claims the fan
+    /// is called, and so an edit that the engine refuses leaves the card showing the truth.
+    /// </remarks>
+    [ObservableProperty]
+    public partial string EditableName { get; set; } = string.Empty;
+
+    /// <summary>What the hardware calls it, whatever the user has renamed it to.</summary>
+    /// <remarks>
+    /// Kept so that clearing a name can restore it, and so the tooltip can still say what the
+    /// hardware thinks this is when the label on the card is something personal.
+    /// </remarks>
+    [ObservableProperty]
+    public partial string ProviderName { get; private set; } = string.Empty;
 
     /// <summary>What it hangs off, for a tooltip rather than the card's face.</summary>
-    public string HardwareName { get; }
+    [ObservableProperty]
+    public partial string HardwareName { get; private set; } = string.Empty;
 
     /// <summary>Where it lives, for when two fans share a name.</summary>
     public string HardwarePath { get; }
@@ -169,10 +187,28 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
         ? "Not measured"
         : $"Starts at {_binding.StartDuty}, stalls below {_binding.StopDuty}";
 
-    /// <summary>Takes a fresh binding and curve list after the configuration changed.</summary>
-    public void Rebind(ControlBindingDefinition binding, IEnumerable<CurveChoice> curves)
+    /// <summary>Takes a fresh descriptor, binding and curve list after anything changed.</summary>
+    public void Rebind(
+        ControlDescriptor? descriptor,
+        ControlBindingDefinition binding,
+        IEnumerable<CurveChoice> curves)
     {
         ArgumentNullException.ThrowIfNull(binding);
+
+        if (descriptor is not null)
+        {
+            Name = descriptor.DisplayName;
+            ProviderName = descriptor.Name;
+            HardwareName = descriptor.HardwareName;
+        }
+
+        // Only when the user is not part-way through typing one. A snapshot arriving mid-edit -
+        // and one arrives whenever anything at all changes - must not overwrite what they are
+        // typing.
+        if (!IsRenaming)
+        {
+            EditableName = Name;
+        }
 
         _binding = binding;
         Curves = [.. curves];
@@ -232,6 +268,36 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
             PinDuty = commanded.Percent;
             _suppressWrite = false;
         }
+    }
+
+    /// <summary>Whether the user currently has the name field open.</summary>
+    public bool IsRenaming { get; set; }
+
+    /// <summary>
+    /// Gives the fan the user's own name, or restores the hardware's.
+    /// </summary>
+    /// <remarks>
+    /// A name typed back to what the hardware already calls it is a removal rather than a stored
+    /// duplicate, so clearing the field and typing the original are the same act — which is what
+    /// somebody undoing a rename will try.
+    /// </remarks>
+    [RelayCommand]
+    private async Task RenameAsync()
+    {
+        IsRenaming = false;
+
+        var wanted = EditableName?.Trim() ?? string.Empty;
+
+        var value = wanted.Length == 0 || string.Equals(wanted, ProviderName, StringComparison.Ordinal)
+            ? null
+            : wanted;
+
+        if (string.Equals(wanted, Name, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        await SendAsync(engine => engine.RenameAsync(Id, value)).ConfigureAwait(true);
     }
 
     /// <summary>Takes the fan by hand, or hands it back to its curve.</summary>

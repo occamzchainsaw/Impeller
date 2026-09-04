@@ -106,12 +106,24 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
 
-                                    <TextBlock
+                                    <!--
+                                        A text box that reads as a label until it is clicked. The
+                                        name is the one thing on this card a person wants to change
+                                        and never thinks of as a setting, so it should not be behind
+                                        a dialog.
+                                    -->
+                                    <TextBox
+                                        Padding="0"
                                         VerticalAlignment="Center"
-                                        Style="{StaticResource BodyStrongTextBlockStyle}"
-                                        Text="{x:Bind Name}"
-                                        TextTrimming="CharacterEllipsis"
-                                        ToolTipService.ToolTip="{x:Bind local:DashboardPage.Where(HardwareName, HardwarePath)}" />
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        FontWeight="SemiBold"
+                                        GotFocus="OnNameFocused"
+                                        KeyDown="OnNameKeyDown"
+                                        LostFocus="OnNameCommitted"
+                                        MaxLength="64"
+                                        Text="{x:Bind EditableName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                        ToolTipService.ToolTip="{x:Bind local:DashboardPage.Where(ProviderName, HardwareName, HardwarePath), Mode=OneWay}" />
 
                                     <Button
                                         Grid.Column="1"

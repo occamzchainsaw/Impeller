@@ -1,4 +1,4 @@
-using Impeller.Core.Abstractions;
+﻿using Impeller.Core.Abstractions;
 using Impeller.Plugins.Abstractions;
 using Impeller.Plugins.Host;
 
@@ -113,7 +113,7 @@ public class PluginTranslationTests
     {
         var sensor = new FakeSensor(SensorKind.Temperature, "CPU Package") { Value = 61.5f };
 
-        var info = PluginTranslation.Describe(sensor);
+        var info = PluginTranslation.Describe(sensor, sensor.Name);
 
         Assert.Equal(PluginTranslation.ToRef(sensor.Id), info.Id);
         Assert.Equal("CPU Package", info.Name);
@@ -125,7 +125,8 @@ public class PluginTranslationTests
     [Fact]
     public void A_sensor_that_is_not_reporting_arrives_as_no_value_rather_than_zero()
     {
-        var info = PluginTranslation.Describe(new FakeSensor(SensorKind.FanSpeed, "Fan #7"));
+        var quiet = new FakeSensor(SensorKind.FanSpeed, "Fan #7");
+        var info = PluginTranslation.Describe(quiet, quiet.Name);
 
         Assert.Null(info.Value);
     }

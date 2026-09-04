@@ -32,6 +32,7 @@ namespace Impeller.Plugins.Host;
 public sealed partial class PluginHost : IAsyncDisposable
 {
     private readonly ISensorRegistry _registry;
+    private readonly ISensorNames _names;
     private readonly PluginRegistry _plugins;
     private readonly PluginHostOptions _options;
     private readonly TimeProvider _time;
@@ -48,6 +49,7 @@ public sealed partial class PluginHost : IAsyncDisposable
     /// <param name="loop">The tick loop, which decides what may be claimed and what is written.</param>
     /// <param name="ownership">Who holds what.</param>
     /// <param name="plugins">What the user has approved.</param>
+    /// <param name="names">The user's own names for this machine's fans and sensors.</param>
     /// <param name="engineVersion">This engine's version, for admissions to carry.</param>
     /// <param name="timeProvider">The clock.</param>
     /// <param name="options">Timings, or the defaults.</param>
@@ -57,6 +59,7 @@ public sealed partial class PluginHost : IAsyncDisposable
         ControlLoop loop,
         ControlOwnershipRegistry ownership,
         PluginRegistry plugins,
+        ISensorNames names,
         string engineVersion,
         TimeProvider timeProvider,
         PluginHostOptions? options = null,
@@ -68,6 +71,7 @@ public sealed partial class PluginHost : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(plugins);
 
         _registry = registry;
+        _names = names ?? throw new ArgumentNullException(nameof(names));
         _plugins = plugins;
         _options = options ?? new PluginHostOptions();
         _time = timeProvider;
@@ -235,7 +239,9 @@ public sealed partial class PluginHost : IAsyncDisposable
         var mayRead = admission?.Has(PluginCapability.ReadSensors) == true;
 
         var sensors = mayRead
-            ? _registry.Sensors.Select(PluginTranslation.Describe).ToArray()
+            ? _registry.Sensors
+                .Select(sensor => PluginTranslation.Describe(sensor, Named(sensor.Id, sensor.Name)))
+                .ToArray()
             : [];
 
         var controls = _registry.Controls.Select(control => Describe(control, admission)).ToArray();
@@ -452,6 +458,14 @@ public sealed partial class PluginHost : IAsyncDisposable
         return new PluginReadings(tick, taken, sensors, controls);
     }
 
+    /// <summary>What to call something: the user's name for it, or the provider's.</summary>
+    /// <remarks>
+    /// Plugins get the user's names for free. A window that says "Seat blower" while the app
+    /// driving that fan says "System Fan #4" is two programs disagreeing about the same object in
+    /// front of the person who named it.
+    /// </remarks>
+    private string Named(SensorId id, string providerName) => _names.Resolve(id, providerName);
+
     private ControlSample Sample(SensorId controlId)
     {
         var owner = Ownership.GetOwner(controlId);
@@ -471,7 +485,7 @@ public sealed partial class PluginHost : IAsyncDisposable
 
         return new ControlInfo(
             reference,
-            control.Name,
+            Named(control.Id, control.Name),
             control.HardwareName,
             control.Fingerprint.ProviderId,
             control.Fingerprint.ToString(),

@@ -110,14 +110,22 @@ public static class PluginTranslation
         _ => ControlLostReason.Revoked,
     };
 
-    /// <summary>A sensor as a plugin sees it.</summary>
-    public static SensorInfo Describe(ISensor sensor)
+    /// <summary>
+    /// A sensor as a plugin sees it.
+    /// </summary>
+    /// <param name="sensor">The engine's sensor.</param>
+    /// <param name="displayName">
+    /// What to call it: the user's own name where they gave one, otherwise the provider's. Passed
+    /// in rather than read here, so there is exactly one place that decides what a thing is called
+    /// and every surface - window, plugin, diagnostic report - agrees.
+    /// </param>
+    public static SensorInfo Describe(ISensor sensor, string displayName)
     {
         ArgumentNullException.ThrowIfNull(sensor);
 
         return new SensorInfo(
             ToRef(sensor.Id),
-            sensor.Name,
+            displayName,
             sensor.HardwareName,
             ToPluginKind(sensor.Kind),
             sensor.Fingerprint.ProviderId,

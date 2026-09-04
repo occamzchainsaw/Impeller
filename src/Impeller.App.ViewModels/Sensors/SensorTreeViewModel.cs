@@ -1,27 +1,66 @@
 ﻿using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using Impeller.Core.Abstractions;
 using Impeller.Ipc.Contracts;
 
 namespace Impeller.App.ViewModels.Sensors;
 
 /// <summary>One sensor, as a row.</summary>
-public sealed partial class SensorItemViewModel(SensorDescriptor descriptor) : ObservableObject
+public sealed partial class SensorItemViewModel(
+    SensorDescriptor descriptor,
+    Func<SensorId, string?, Task>? rename = null) : ObservableObject
 {
     /// <summary>Stable identity, and the only thing a configuration ever stores.</summary>
     public SensorId Id { get; } = descriptor.Id;
 
-    /// <summary>What to show: the sensor's own name, nothing else.</summary>
+    /// <summary>What to show: the user's name for it, or the sensor's own.</summary>
     /// <remarks>
     /// Under a heading that already names the hardware, a row that repeats it reads its own address
-    /// out twice. The provider now supplies the two separately, so there is nothing to strip.
+    /// out twice. The provider supplies the two separately, so there is nothing to strip.
     /// </remarks>
-    public string Name { get; } = descriptor.Name;
+    public string Name { get; } = descriptor.DisplayName;
 
-    /// <summary>Its hardware and its name together, for a tooltip and for a flat list.</summary>
+    /// <summary>What the hardware calls it, so a renamed sensor can still be found by it.</summary>
+    public string ProviderName { get; } = descriptor.Name;
+
+    /// <summary>The name as the user is editing it.</summary>
+    [ObservableProperty]
+    public partial string EditableName { get; set; } = descriptor.DisplayName;
+
+    /// <summary>Whether the field is open, so a refresh does not overwrite what is being typed.</summary>
+    public bool IsRenaming { get; set; }
+
+    /// <summary>Its hardware and its own name together, for a tooltip and for a flat list.</summary>
     public string FullName { get; } = string.IsNullOrWhiteSpace(descriptor.HardwareName)
         ? descriptor.Name
         : $"{descriptor.HardwareName} — {descriptor.Name}";
+
+    /// <summary>
+    /// Gives it the user's own name, or restores the provider's.
+    /// </summary>
+    /// <remarks>
+    /// Here as well as on a fan's card, because a temperature has no card and "Radiator out" is
+    /// worth exactly as much as a named fan.
+    /// </remarks>
+    [RelayCommand]
+    private async Task RenameAsync()
+    {
+        IsRenaming = false;
+
+        var wanted = EditableName?.Trim() ?? string.Empty;
+
+        if (rename is null || string.Equals(wanted, Name, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var value = wanted.Length == 0 || string.Equals(wanted, ProviderName, StringComparison.Ordinal)
+            ? null
+            : wanted;
+
+        await rename(Id, value).ConfigureAwait(true);
+    }
 
     /// <summary>What it measures.</summary>
     public SensorKind Kind { get; } = descriptor.Kind;
@@ -119,6 +158,15 @@ public sealed partial class SensorTreeViewModel : ObservableObject
     [ObservableProperty]
     public partial string Search { get; set; } = string.Empty;
 
+    /// <summary>
+    /// How a row asks for a sensor to be renamed, or null when this tree does not offer it.
+    /// </summary>
+    /// <remarks>
+    /// Supplied rather than reached for, so the tree stays a view over descriptors and the curve
+    /// picker - which uses the same tree - does not quietly become an editor.
+    /// </remarks>
+    public Func<SensorId, string?, Task>? Rename { get; set; }
+
     /// <summary>The row the user picked, if this tree is being used to choose one.</summary>
     [ObservableProperty]
     public partial SensorItemViewModel? Selected { get; set; }
@@ -178,7 +226,7 @@ public sealed partial class SensorTreeViewModel : ObservableObject
 
             foreach (var descriptor in group.OrderBy(sensor => sensor.Kind).ThenBy(sensor => sensor.Name, StringComparer.OrdinalIgnoreCase))
             {
-                var item = new SensorItemViewModel(descriptor);
+                var item = new SensorItemViewModel(descriptor, Rename);
                 view.Sensors.Add(item);
                 _items[descriptor.Id] = item;
             }

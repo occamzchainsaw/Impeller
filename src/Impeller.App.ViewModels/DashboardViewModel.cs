@@ -205,7 +205,7 @@ public sealed partial class DashboardViewModel(EngineConnection connection)
 
             if (_cards.TryGetValue(binding.ControlId, out var existing))
             {
-                existing.Rebind(binding, Curves);
+                existing.Rebind(descriptor, binding, Curves);
 
                 if (descriptor is not null)
                 {
