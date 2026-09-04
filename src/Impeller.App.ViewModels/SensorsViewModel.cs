@@ -1,4 +1,5 @@
 ﻿using Impeller.App.ViewModels.Engine;
+using Impeller.App.ViewModels.Notifications;
 using Impeller.App.ViewModels.Sensors;
 using Impeller.Core.Abstractions;
 using Impeller.Ipc.Contracts;
@@ -14,8 +15,8 @@ namespace Impeller.App.ViewModels;
 /// </remarks>
 public sealed partial class SensorsViewModel : EnginePageViewModel
 {
-    public SensorsViewModel(EngineConnection connection)
-        : base(connection) =>
+    public SensorsViewModel(EngineConnection connection, NotificationCenter notifications)
+        : base(connection, notifications) =>
         Tree.Rename = RenameAsync;
 
     /// <inheritdoc />

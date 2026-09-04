@@ -1,5 +1,6 @@
 using Impeller.App.ViewModels;
 using Impeller.App.ViewModels.Engine;
+using Impeller.App.ViewModels.Notifications;
 using Impeller.Platform.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -83,6 +84,14 @@ public partial class App : Application, IDisposable
             IsEngineInstalled = ServiceControlManager.IsInstalled,
         });
 
+        // One for the window, not one per page: the whole point is that a message outlives the
+        // page that raised it, and a centre owned by a page would be discarded with it.
+        services.AddSingleton<NotificationCenter>();
+
+        // Singleton for the same reason - it is the strip at the foot of the window, which does not
+        // belong to any page and must not be rebuilt when one is navigated away from.
+        services.AddSingleton(sp => new ShellStatusViewModel(sp.GetRequiredService<EngineConnection>()));
+
         // Transient: a page navigated away from is discarded along with its view model, so
         // returning to it starts from a clean state rather than one the user last left behind.
         services.AddTransient<DashboardViewModel>();
@@ -110,14 +119,35 @@ public partial class App : Application, IDisposable
         // Ticks arrive on a transport thread and everything downstream of them is bound to XAML,
         // which throws rather than merely disliking being touched from elsewhere. Handed over
         // before the connection starts, so the very first tick is already marshalled.
+        var dispatcher = new ShellDispatcher(DispatcherQueue.GetForCurrentThread());
+
         var connection = GetService<EngineConnection>();
-        connection.Dispatcher = new ShellDispatcher(DispatcherQueue.GetForCurrentThread());
+        connection.Dispatcher = dispatcher;
+
+        // A view model can post from a continuation on the transport thread, and the history is
+        // bound to a list that throws if it is touched from anywhere else.
+        GetService<NotificationCenter>().Dispatcher = dispatcher;
 
         // Started before the window so the first page to open finds a connection already in
         // progress rather than one that begins when it happens to be looked at.
         connection.Start();
 
-        _window = new MainWindow();
+        try
+        {
+            _window = new MainWindow();
+        }
+        catch (Exception ex)
+        {
+            // A XAML parse failure during window construction does not reliably reach the handler
+            // above: it surfaces as a stowed WinRT exception and the process is gone before Serilog
+            // has flushed. This is the only place that can say what actually happened.
+            Log.Crashed(logger, ex);
+            ShellLogging.Close();
+
+            File.WriteAllText(Path.Combine(ShellLogging.LogRoot, "crash.log"), ex.ToString());
+            throw;
+        }
+
         MainWindowHandle = WindowNative.GetWindowHandle(_window);
 
         // The icon outlives the window: closing hides rather than exits, so there is still

@@ -66,12 +66,6 @@
         <ScrollViewer Grid.Column="1">
             <StackPanel Spacing="14">
 
-                <InfoBar
-                    IsClosable="True"
-                    IsOpen="{x:Bind local:CurvesPage.HasText(ViewModel.Problem), Mode=OneWay}"
-                    Message="{x:Bind ViewModel.Problem, Mode=OneWay}"
-                    Severity="Warning" />
-
                 <TextBlock
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     Text="Select a curve, or make one."

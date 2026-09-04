@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Impeller.App.ViewModels.Curves;
 using Impeller.App.ViewModels.Engine;
+using Impeller.App.ViewModels.Notifications;
 using Impeller.App.ViewModels.Sensors;
 using Impeller.Core.Abstractions;
 using Impeller.Core.Abstractions.Configuration;
@@ -46,8 +47,8 @@ public sealed partial class CurveListItemViewModel(CurveDefinition definition) :
 /// means dragging a point across a canvas applies twenty intermediate configurations to real fans,
 /// most of them shapes the user was passing through rather than choosing.
 /// </remarks>
-public sealed partial class CurvesViewModel(EngineConnection connection)
-    : EnginePageViewModel(connection)
+public sealed partial class CurvesViewModel(EngineConnection connection, NotificationCenter notifications)
+    : EnginePageViewModel(connection, notifications)
 {
     /// <inheritdoc />
     public override string Title => "Curves";
@@ -73,10 +74,6 @@ public sealed partial class CurvesViewModel(EngineConnection connection)
     /// <summary>Whether the open curve has unsaved changes.</summary>
     [ObservableProperty]
     public partial bool IsDirty { get; set; }
-
-    /// <summary>Whatever the last save turned up, or null.</summary>
-    [ObservableProperty]
-    public partial string? Problem { get; private set; }
 
     /// <inheritdoc />
     protected override void OnSnapshot(EngineSnapshot snapshot)
@@ -128,7 +125,6 @@ public sealed partial class CurvesViewModel(EngineConnection connection)
         Editor = new CurveEditorViewModel(definition);
         SensorPicker.Select(Editor.Source);
         IsDirty = false;
-        Problem = null;
     }
 
     /// <summary>
@@ -274,7 +270,7 @@ public sealed partial class CurvesViewModel(EngineConnection connection)
     {
         if (Connection.Engine is not { } engine)
         {
-            Problem = "Not connected to the engine.";
+            Notify.Error("Not connected to the engine.", "Nothing was saved.");
             return false;
         }
 
@@ -282,17 +278,32 @@ public sealed partial class CurvesViewModel(EngineConnection connection)
         {
             var result = await engine.ApplyConfigurationAsync(configuration).ConfigureAwait(true);
 
-            // Warnings are shown as well as errors. A curve reading hardware that is not here right
-            // now applies perfectly well and is still worth mentioning before the user walks away.
-            Problem = result.Validation.Issues.Count == 0
-                ? null
-                : string.Join(" ", result.Validation.Issues.Select(issue => issue.Message));
+            // Warnings are said as well as errors. A curve reading hardware that is not here
+            // right now applies perfectly well and is still worth mentioning before the user
+            // walks away - so the severity follows whether it applied, not whether it was quiet.
+            if (result.Validation.Issues.Count > 0)
+            {
+                var detail = string.Join(" ", result.Validation.Issues.Select(issue => issue.Message));
+
+                if (result.Applied)
+                {
+                    Notify.Warn("Saved, with something worth knowing.", detail);
+                }
+                else
+                {
+                    Notify.Error("The curve was refused.", detail);
+                }
+            }
+            else if (result.Applied)
+            {
+                Notify.Success("Curves saved.");
+            }
 
             return result.Applied;
         }
         catch (Exception ex)
         {
-            Problem = ex.Message;
+            Notify.Error("The curve could not be saved.", ex);
             return false;
         }
     }

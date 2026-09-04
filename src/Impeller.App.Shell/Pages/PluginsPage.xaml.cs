@@ -26,7 +26,7 @@ public sealed partial class PluginsPage : Page
     /// <summary>The page's view model, pulled from the container because WinUI builds pages itself.</summary>
     public PluginsViewModel ViewModel { get; } = App.GetService<PluginsViewModel>();
 
-    /// <summary>Whether there is anything to show, for a bar that appears only when there is.</summary>
+    /// <summary>Whether the card has an id at all, which is what makes Apply meaningful.</summary>
     public static bool HasText(string? text) => !string.IsNullOrWhiteSpace(text);
 
     /// <summary>Shown when the condition holds.</summary>

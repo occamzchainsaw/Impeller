@@ -13,7 +13,6 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -43,25 +42,9 @@
             </DropDownButton>
         </Grid>
 
-        <!--  Informational while connected, a warning when not: fans going unmanaged is not a neutral state.  -->
-        <InfoBar
-            Grid.Row="1"
-            Title="Engine"
-            IsClosable="False"
-            IsOpen="True"
-            Message="{x:Bind ViewModel.EngineStatus, Mode=OneWay}"
-            Severity="{x:Bind local:DashboardPage.SeverityFor(ViewModel.IsConnected), Mode=OneWay}" />
-
-        <InfoBar
-            Grid.Row="2"
-            IsClosable="True"
-            IsOpen="{x:Bind local:DashboardPage.HasText(ViewModel.Problem), Mode=OneWay}"
-            Message="{x:Bind ViewModel.Problem, Mode=OneWay}"
-            Severity="Error" />
-
         <!--  A configuration with no fans in it needs a sentence, not a blank panel.  -->
         <StackPanel
-            Grid.Row="3"
+            Grid.Row="1"
             VerticalAlignment="Top"
             Spacing="6"
             Visibility="{x:Bind local:DashboardPage.When(ViewModel.IsEmpty), Mode=OneWay}">
@@ -78,7 +61,7 @@
             ItemsRepeater rather than ItemsControl, so only the tiles on screen are built. The list
             it replaces materialised every control whether it was visible or not.
         -->
-        <ScrollViewer Grid.Row="3" Visibility="{x:Bind local:DashboardPage.WhenNot(ViewModel.IsEmpty), Mode=OneWay}">
+        <ScrollViewer Grid.Row="2" Visibility="{x:Bind local:DashboardPage.WhenNot(ViewModel.IsEmpty), Mode=OneWay}">
             <ItemsRepeater ItemsSource="{x:Bind ViewModel.Controls}">
                 <ItemsRepeater.Layout>
                     <UniformGridLayout

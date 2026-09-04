@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Impeller.App.ViewModels.Controls;
 using Impeller.App.ViewModels.Engine;
+using Impeller.App.ViewModels.Notifications;
 using Impeller.Core.Abstractions;
 using Impeller.Core.Abstractions.Configuration;
 using Impeller.Ipc.Contracts;
@@ -53,8 +54,8 @@ public readonly record struct AvailableFan(SensorId Id, string Name, string Hard
 /// this window is closed, and what would let a different front end replace it.
 /// </para>
 /// </remarks>
-public sealed partial class DashboardViewModel(EngineConnection connection)
-    : EnginePageViewModel(connection)
+public sealed partial class DashboardViewModel(EngineConnection connection, NotificationCenter notifications)
+    : EnginePageViewModel(connection, notifications)
 {
     private readonly Dictionary<SensorId, ControlCardViewModel> _cards = [];
     private readonly Dictionary<SensorId, SensorId> _tachometers = [];
@@ -66,10 +67,6 @@ public sealed partial class DashboardViewModel(EngineConnection connection)
     /// <summary>How many sensors the engine can see.</summary>
     [ObservableProperty]
     public partial int SensorCount { get; private set; }
-
-    /// <summary>Whatever the last edit from this page turned up, or null.</summary>
-    [ObservableProperty]
-    public partial string? Problem { get; private set; }
 
     /// <summary>Whether the configuration names no fans at all.</summary>
     [ObservableProperty]
@@ -266,7 +263,7 @@ public sealed partial class DashboardViewModel(EngineConnection connection)
     {
         if (Connection.Engine is not { } engine || Snapshot is not { } snapshot)
         {
-            Problem = "Not connected to the engine.";
+            Notify.Error("Not connected to the engine.", "The change was not saved.");
             return;
         }
 
@@ -288,13 +285,18 @@ public sealed partial class DashboardViewModel(EngineConnection connection)
         {
             var result = await engine.ApplyConfigurationAsync(configuration).ConfigureAwait(true);
 
-            Problem = result.Applied
-                ? null
-                : string.Join(" ", result.Validation.Issues.Select(issue => issue.Message));
+            // Only failure is announced. A configuration applying is what the user just watched
+            // happen on the card, and a toast for every slider release would be unusable.
+            if (!result.Applied)
+            {
+                Notify.Error(
+                    "The change was refused.",
+                    string.Join(" ", result.Validation.Issues.Select(issue => issue.Message)));
+            }
         }
         catch (Exception ex)
         {
-            Problem = ex.Message;
+            Notify.Error("The change could not be saved.", ex);
         }
     }
 

@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Impeller.App.ViewModels.Engine;
+using Impeller.App.ViewModels.Notifications;
 using Impeller.Ipc.Contracts;
 
 namespace Impeller.App.ViewModels;
@@ -18,30 +19,38 @@ public abstract partial class EnginePageViewModel : PageViewModel, IDisposable
 {
     private bool _disposed;
 
-    protected EnginePageViewModel(EngineConnection connection)
+    protected EnginePageViewModel(EngineConnection connection, NotificationCenter notifications)
     {
         ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(notifications);
 
         Connection = connection;
+        Notify = notifications;
 
         connection.PropertyChanged += OnConnectionPropertyChanged;
         connection.SnapshotReceived += OnSnapshotReceived;
         connection.Ticked += OnTickReceived;
         connection.ConfigurationChanged += OnConfigurationResult;
 
-        EngineStatus = connection.StatusMessage;
         IsConnected = connection.State == EngineConnectionState.Connected;
     }
 
     /// <summary>The shell's end of the channel.</summary>
     protected EngineConnection Connection { get; }
 
+    /// <summary>
+    /// Where a page says what just happened.
+    /// </summary>
+    /// <remarks>
+    /// Every page used to carry its own <c>InfoBar</c> and a <c>Problem</c> string behind it, which
+    /// meant a failure was only visible while the user stayed on the page that caused it and only
+    /// until the next one overwrote it. One centre for the window instead, so a message outlives
+    /// both the page and the moment.
+    /// </remarks>
+    protected NotificationCenter Notify { get; }
+
     /// <summary>The most recent full snapshot, or null before the first connection.</summary>
     protected EngineSnapshot? Snapshot { get; private set; }
-
-    /// <summary>A plain statement of where the engine stands, good news or not.</summary>
-    [ObservableProperty]
-    public partial string EngineStatus { get; private set; } = "Not connected to the engine service.";
 
     /// <summary>Whether the engine is reachable, so a page can say so rather than showing nothing.</summary>
     [ObservableProperty]
@@ -104,7 +113,6 @@ public abstract partial class EnginePageViewModel : PageViewModel, IDisposable
 
     private void OnConnectionPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        EngineStatus = Connection.StatusMessage;
         IsConnected = Connection.State == EngineConnectionState.Connected;
     }
 

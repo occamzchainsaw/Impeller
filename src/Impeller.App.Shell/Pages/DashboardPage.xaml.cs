@@ -24,18 +24,11 @@ public sealed partial class DashboardPage : Page
     /// <summary>The page's view model, pulled from the container because WinUI builds pages itself.</summary>
     public DashboardViewModel ViewModel { get; } = App.GetService<DashboardViewModel>();
 
-    /// <summary>
-    /// An unreachable engine is a warning, not a note. Fans left to the firmware is a state worth
-    /// noticing rather than one to report in the same tone as everything being fine.
-    /// </summary>
-    public static InfoBarSeverity SeverityFor(bool connected) =>
-        connected ? InfoBarSeverity.Success : InfoBarSeverity.Warning;
-
     /// <summary>Reads better than a bare number bound next to a label.</summary>
     public static string SensorSummary(int count) =>
         count == 1 ? "1 sensor" : $"{count} sensors";
 
-    /// <summary>Whether there is anything to show, for a bar that appears only when there is.</summary>
+    /// <summary>Whether a card has something to say, for the one bar that is still a card's own.</summary>
     public static bool HasText(string? text) => !string.IsNullOrWhiteSpace(text);
 
     /// <summary>Inverts a flag, which x:Bind cannot do on its own.</summary>

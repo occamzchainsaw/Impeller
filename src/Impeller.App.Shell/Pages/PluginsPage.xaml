@@ -13,7 +13,6 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -37,16 +36,9 @@
                 Content="Refresh" />
         </Grid>
 
-        <InfoBar
-            Grid.Row="1"
-            IsClosable="True"
-            IsOpen="{x:Bind local:PluginsPage.HasText(ViewModel.Problem), Mode=OneWay}"
-            Message="{x:Bind ViewModel.Problem, Mode=OneWay}"
-            Severity="Error" />
-
         <!--  The empty state has to explain itself: nothing here is not a failure, it is the normal case.  -->
         <StackPanel
-            Grid.Row="2"
+            Grid.Row="1"
             Spacing="6"
             Visibility="{x:Bind local:PluginsPage.When(ViewModel.IsEmpty), Mode=OneWay}">
             <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="No program has asked yet." />
@@ -58,7 +50,7 @@
                 TextWrapping="Wrap" />
         </StackPanel>
 
-        <ScrollViewer Grid.Row="3">
+        <ScrollViewer Grid.Row="2">
             <ItemsControl ItemsSource="{x:Bind ViewModel.Plugins}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="plugins:PluginCardViewModel">
@@ -83,11 +75,11 @@
                                         <StackPanel Orientation="Horizontal" Spacing="10">
                                             <TextBlock
                                                 Style="{StaticResource SubtitleTextBlockStyle}"
-                                                Text="{x:Bind DisplayName}" />
+                                                Text="{x:Bind DisplayName, Mode=OneWay}" />
                                             <TextBlock
                                                 VerticalAlignment="Bottom"
                                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                Text="{x:Bind Version}" />
+                                                Text="{x:Bind Version, Mode=OneWay}" />
                                         </StackPanel>
 
                                         <TextBlock
@@ -97,22 +89,29 @@
                                             Text="{x:Bind Id}" />
                                     </StackPanel>
 
+                                    <!--
+                                        Mode=OneWay throughout this card, and not out of habit.
+                                        x:Bind defaults to OneTime, so every line here was painted
+                                        once and never again: approving a plugin worked, changed
+                                        the engine, and left the card saying exactly what it said
+                                        before. That is the bug that looked like nothing happening.
+                                    -->
                                     <StackPanel Grid.Column="1" HorizontalAlignment="Right">
                                         <TextBlock
                                             Style="{StaticResource BodyStrongTextBlockStyle}"
-                                            Text="{x:Bind StateText}"
+                                            Text="{x:Bind StateText, Mode=OneWay}"
                                             TextAlignment="Right" />
                                         <TextBlock
                                             FontSize="12"
                                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                            Text="{x:Bind local:PluginsPage.ConnectedLabel(IsConnected)}"
+                                            Text="{x:Bind local:PluginsPage.ConnectedLabel(IsConnected), Mode=OneWay}"
                                             TextAlignment="Right" />
                                     </StackPanel>
                                 </Grid>
 
                                 <TextBlock
                                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    Text="{x:Bind GrantsText}"
+                                    Text="{x:Bind GrantsText, Mode=OneWay}"
                                     TextWrapping="Wrap" />
 
                                 <!--
@@ -125,12 +124,12 @@
                                     FontSize="12"
                                     Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                     IsTextSelectionEnabled="True"
-                                    Text="{x:Bind ProgramText}"
+                                    Text="{x:Bind ProgramText, Mode=OneWay}"
                                     TextWrapping="Wrap" />
 
                                 <InfoBar
                                     IsClosable="False"
-                                    IsOpen="{x:Bind WantsHardwareProvision}"
+                                    IsOpen="{x:Bind WantsHardwareProvision, Mode=OneWay}"
                                     Message="This plugin also offers hardware of its own. Impeller speaks that part of the contract but does not implement it yet, so there is nothing here to grant and nothing is wrong."
                                     Severity="Informational" />
 
@@ -145,17 +144,26 @@
                                     HorizontalAlignment="Stretch"
                                     HorizontalContentAlignment="Stretch"
                                     Header="Fans it may drive">
-                                    <ItemsControl ItemsSource="{x:Bind Fans}">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate x:DataType="plugins:GrantedFanViewModel">
-                                                <CheckBox
-                                                    Content="{x:Bind Name}"
-                                                    IsChecked="{x:Bind Granted, Mode=TwoWay}"
-                                                    IsEnabled="{x:Bind Claimable}"
-                                                    ToolTipService.ToolTip="{x:Bind local:PluginsPage.FanTooltip(Obstacle)}" />
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
+                                    <StackPanel Spacing="6">
+                                        <!--  An empty box is indistinguishable from a broken one, so it says why it is empty.  -->
+                                        <TextBlock
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Text="Impeller has not sent this machine's fans yet. They appear here once the engine is connected."
+                                            TextWrapping="Wrap"
+                                            Visibility="{x:Bind local:PluginsPage.WhenNot(HasFans), Mode=OneWay}" />
+
+                                        <ItemsControl ItemsSource="{x:Bind Fans}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="plugins:GrantedFanViewModel">
+                                                    <CheckBox
+                                                        Content="{x:Bind Name}"
+                                                        IsChecked="{x:Bind Granted, Mode=TwoWay}"
+                                                        IsEnabled="{x:Bind Claimable}"
+                                                        ToolTipService.ToolTip="{x:Bind local:PluginsPage.FanTooltip(Obstacle)}" />
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
                                 </Expander>
 
                                 <!--
@@ -172,7 +180,7 @@
 
                                     <Button
                                         Command="{x:Bind ToggleEnabledCommand}"
-                                        Content="{x:Bind local:PluginsPage.EnableLabel(IsEnabled)}"
+                                        Content="{x:Bind local:PluginsPage.EnableLabel(IsEnabled), Mode=OneWay}"
                                         ToolTipService.ToolTip="Stop it connecting at all. Its permissions are kept, so switching it back on is one click." />
 
                                     <Button

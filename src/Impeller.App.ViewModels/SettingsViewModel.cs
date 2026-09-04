@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Impeller.App.ViewModels.Engine;
+using Impeller.App.ViewModels.Notifications;
 using Impeller.App.ViewModels.Tuning;
 using Impeller.Core.Abstractions;
 using Impeller.Core.Abstractions.Configuration;
@@ -21,8 +22,8 @@ public sealed partial class SettingsViewModel : EnginePageViewModel
 {
     private bool _disposed;
 
-    public SettingsViewModel(EngineConnection connection)
-        : base(connection) => Tuning = new TuningViewModel(connection);
+    public SettingsViewModel(EngineConnection connection, NotificationCenter notifications)
+        : base(connection, notifications) => Tuning = new TuningViewModel(connection);
 
     /// <inheritdoc />
     public override string Title => "Settings";
@@ -51,14 +52,6 @@ public sealed partial class SettingsViewModel : EnginePageViewModel
     /// <summary>Where the engine keeps its state, so a bug report names the right folder.</summary>
     [ObservableProperty]
     public partial string ConfigurationRoot { get; private set; } = string.Empty;
-
-    /// <summary>A sentence about whatever was last attempted here.</summary>
-    [ObservableProperty]
-    public partial string? Message { get; private set; }
-
-    /// <summary>Whether the last thing attempted here failed.</summary>
-    [ObservableProperty]
-    public partial bool MessageIsProblem { get; private set; }
 
     /// <summary>The diagnostic bundle as text, once it has been fetched.</summary>
     [ObservableProperty]
@@ -117,9 +110,8 @@ public sealed partial class SettingsViewModel : EnginePageViewModel
 
             Report(
                 result.Applied,
-                result.Applied
-                    ? $"Now running '{result.Name}'."
-                    : Explain(result.Validation, $"'{name}' could not be applied."));
+                result.Applied ? $"Now running '{result.Name}'." : $"'{name}' could not be applied.",
+                Errors(result.Validation));
         }).ConfigureAwait(true);
     }
 
@@ -148,7 +140,8 @@ public sealed partial class SettingsViewModel : EnginePageViewModel
 
             Report(
                 result.Applied,
-                result.Applied ? $"Saved and switched to '{name}'." : Explain(result.Validation, "Could not save."));
+                result.Applied ? $"Saved and switched to '{name}'." : "Could not save.",
+                Errors(result.Validation));
 
             if (result.Applied)
             {
@@ -235,7 +228,8 @@ public sealed partial class SettingsViewModel : EnginePageViewModel
 
             Report(
                 true,
-                $"Saved as '{summary.Name}': {summary.Curves} curves, {summary.Controls} controls, "
+                $"Imported as '{summary.Name}'.",
+                $"{summary.Curves} curves, {summary.Controls} controls, "
                 + $"{summary.CustomSensors} computed sensors."
                 + (attention == 0
                     ? " Load it when you are ready."
@@ -314,27 +308,33 @@ public sealed partial class SettingsViewModel : EnginePageViewModel
         }
     }
 
-    private void Report(bool succeeded, string message)
+    private void Report(bool succeeded, string headline, string? detail = null)
     {
-        Message = message;
-        MessageIsProblem = !succeeded;
+        if (succeeded)
+        {
+            Notify.Success(headline, detail);
+        }
+        else
+        {
+            Notify.Error(headline, detail);
+        }
     }
 
     /// <summary>
-    /// A refusal with its reasons attached.
+    /// The reasons behind a refusal, or null when there were none to give.
     /// </summary>
     /// <remarks>
     /// "Could not be applied" on its own sends someone to the log. The validator already knows
     /// exactly which curve points at what, and that is what the user needs to read.
     /// </remarks>
-    private static string Explain(ConfigurationValidation validation, string headline)
+    private static string? Errors(ConfigurationValidation validation)
     {
         var issues = validation.Issues
             .Where(issue => issue.Severity == ConfigurationSeverity.Error)
             .Select(issue => issue.Message)
             .ToList();
 
-        return issues.Count == 0 ? headline : $"{headline} {string.Join(" ", issues)}";
+        return issues.Count == 0 ? null : string.Join(" ", issues);
     }
 
     /// <inheritdoc />

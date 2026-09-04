@@ -38,9 +38,6 @@ public sealed partial class CurvesPage : Page
     /// <summary>The page's view model, pulled from the container because WinUI builds pages itself.</summary>
     public CurvesViewModel ViewModel { get; } = App.GetService<CurvesViewModel>();
 
-    /// <summary>Whether there is anything to show, for a bar that appears only when there is.</summary>
-    public static bool HasText(string? text) => !string.IsNullOrWhiteSpace(text);
-
     /// <summary>Shown when nothing is selected.</summary>
     public static Visibility WhenNull(object? value) =>
         value is null ? Visibility.Visible : Visibility.Collapsed;

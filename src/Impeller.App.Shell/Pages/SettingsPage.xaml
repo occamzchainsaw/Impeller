@@ -15,12 +15,6 @@
 
             <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="{x:Bind ViewModel.Title}" />
 
-            <InfoBar
-                IsClosable="True"
-                IsOpen="{x:Bind local:SettingsPage.HasText(ViewModel.Message), Mode=OneWay}"
-                Message="{x:Bind ViewModel.Message, Mode=OneWay}"
-                Severity="{x:Bind local:SettingsPage.SeverityFor(ViewModel.MessageIsProblem), Mode=OneWay}" />
-
             <!--  Configurations: switch, copy, remove.  -->
             <Expander
                 HorizontalAlignment="Stretch"

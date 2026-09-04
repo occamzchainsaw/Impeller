@@ -22,12 +22,13 @@ public sealed partial class GrantedFanViewModel(SensorId id, string name, bool g
     public partial bool Granted { get; set; } = granted;
 
     /// <summary>
-    /// Whether it could be granted at all: the engine drives it and it has a curve to fall back to.
+    /// Whether it could be granted at all, which now means only that the engine is driving it.
     /// </summary>
     /// <remarks>
-    /// A fan that fails this cannot be given to a plugin, because there would be nothing for the
-    /// fan to return to when the plugin let go or died. Shown greyed with a reason rather than
-    /// hidden, so switching a fan on is a discoverable fix rather than a mystery.
+    /// It also required a curve, once, on the reasoning that the curve was what the fan returned to
+    /// when the plugin let go. Every enabled fan has a resting state of its own now, so the engine
+    /// answers this from whether the fan is switched on and nothing else. Shown greyed with a
+    /// reason rather than hidden, so switching a fan on is a discoverable fix rather than a mystery.
     /// </remarks>
     public bool Claimable { get; } = claimable;
 
@@ -168,7 +169,8 @@ public sealed partial class PluginCardViewModel : ObservableObject
     /// <summary>Whether there are any fans to show at all.</summary>
     /// <remarks>
     /// An empty list needs a sentence rather than an empty box. It means the shell has not received
-    /// the machine's controls yet, and saying so beats leaving someone staring at nothing.
+    /// the machine's controls yet, and saying so beats leaving someone staring at nothing. Bound
+    /// OneWay, like everything else computed on this card, because it becomes true later.
     /// </remarks>
     public bool HasFans { get; private set; }
 

@@ -32,7 +32,7 @@ public sealed partial class SettingsPage : Page
     /// <summary>The page's view model, pulled from the container because WinUI builds pages itself.</summary>
     public SettingsViewModel ViewModel { get; } = App.GetService<SettingsViewModel>();
 
-    /// <summary>Whether there is anything to show, for a bar that appears only when there is.</summary>
+    /// <summary>Whether there is anything to show, for a button that is dead until there is.</summary>
     public static bool HasText(string? text) => !string.IsNullOrWhiteSpace(text);
 
     /// <summary>The same question, as a visibility.</summary>
@@ -44,10 +44,6 @@ public sealed partial class SettingsPage : Page
 
     /// <summary>Shows something only while a flag is set.</summary>
     public static Visibility WhenTrue(bool value) => value ? Visibility.Visible : Visibility.Collapsed;
-
-    /// <summary>Errors as errors, everything else as a note.</summary>
-    public static InfoBarSeverity SeverityFor(bool problem) =>
-        problem ? InfoBarSeverity.Error : InfoBarSeverity.Success;
 
     /// <summary>Which configuration is in force, spelled out.</summary>
     public static string Running(string name) =>

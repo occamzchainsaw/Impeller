@@ -2,6 +2,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Impeller.App.ViewModels.Engine;
+using Impeller.App.ViewModels.Notifications;
 using Impeller.App.ViewModels.Plugins;
 using Impeller.Ipc.Contracts;
 using Impeller.Plugins.Abstractions;
@@ -26,7 +27,8 @@ namespace Impeller.App.ViewModels;
 /// as the user.
 /// </para>
 /// </remarks>
-public sealed partial class PluginsViewModel(EngineConnection connection) : EnginePageViewModel(connection)
+public sealed partial class PluginsViewModel(EngineConnection connection, NotificationCenter notifications)
+    : EnginePageViewModel(connection, notifications)
 {
     /// <inheritdoc />
     public override string Title => "Plugins";
@@ -41,10 +43,6 @@ public sealed partial class PluginsViewModel(EngineConnection connection) : Engi
     /// <summary>How many are waiting on the user, for a heading that says so.</summary>
     [ObservableProperty]
     public partial int WaitingCount { get; private set; }
-
-    /// <summary>Whatever went wrong, or null.</summary>
-    [ObservableProperty]
-    public partial string? Problem { get; private set; }
 
     /// <inheritdoc />
     public override async Task LoadAsync(CancellationToken cancellationToken = default)
@@ -72,7 +70,6 @@ public sealed partial class PluginsViewModel(EngineConnection connection) : Engi
     {
         if (Connection.Engine is not { } engine)
         {
-            Problem = "Not connected to the engine.";
             return;
         }
 
@@ -106,11 +103,10 @@ public sealed partial class PluginsViewModel(EngineConnection connection) : Engi
 
             IsEmpty = Plugins.Count == 0;
             WaitingCount = Plugins.Count(plugin => plugin.NeedsAnswer);
-            Problem = null;
         }
         catch (Exception ex)
         {
-            Problem = ex.Message;
+            Notify.Error("Could not read the plugin list.", ex);
         }
     }
 
@@ -136,7 +132,7 @@ public sealed partial class PluginsViewModel(EngineConnection connection) : Engi
     {
         if (Connection.Engine is not { } engine)
         {
-            Problem = "Not connected to the engine.";
+            Notify.Error("Not connected to the engine.", "Nothing was changed.");
             return;
         }
 
@@ -147,26 +143,39 @@ public sealed partial class PluginsViewModel(EngineConnection connection) : Engi
             switch (action)
             {
                 case PluginAction.Approve:
-                    await ApproveAsync(engine, card).ConfigureAwait(true);
+                    // Said out loud, listing exactly what was granted. Deciding what another
+                    // program may do to this machine's cooling is the one action in the whole
+                    // shell that must never complete in silence - and it did, which is why this
+                    // mechanism exists at all.
+                    Notify.Success($"{card.DisplayName} approved.", await ApproveAsync(engine, card).ConfigureAwait(true));
                     break;
 
                 case PluginAction.ToggleEnabled:
-                    await engine.SetPluginEnabledAsync(card.Id, !card.IsEnabled).ConfigureAwait(true);
+                    var enabling = !card.IsEnabled;
+                    await engine.SetPluginEnabledAsync(card.Id, enabling).ConfigureAwait(true);
+
+                    Notify.Success(
+                        enabling ? $"{card.DisplayName} switched on." : $"{card.DisplayName} switched off.",
+                        enabling
+                            ? "It may connect again. Its permissions were kept."
+                            : "Any fan it was driving has gone back to Impeller.");
                     break;
 
                 case PluginAction.Forget:
                     await engine.ForgetPluginAsync(card.Id).ConfigureAwait(true);
+
+                    Notify.Success(
+                        $"{card.DisplayName} forgotten.",
+                        "The next time it connects you will be asked about it as if it were new.");
                     break;
 
                 default:
                     break;
             }
-
-            Problem = null;
         }
         catch (Exception ex)
         {
-            Problem = ex.Message;
+            Notify.Error("The plugin was not changed.", ex);
         }
         finally
         {
@@ -179,13 +188,14 @@ public sealed partial class PluginsViewModel(EngineConnection connection) : Engi
     }
 
     /// <summary>
-    /// Sends the whole set of permissions as one decision.
+    /// Sends the whole set of permissions as one decision, and describes what was sent.
     /// </summary>
     /// <remarks>
     /// One call rather than a grant per fan, so a user ticking three boxes and pressing Approve gets
     /// three fans or none — never a plugin left holding two of them because the third failed.
     /// </remarks>
-    private static async Task ApproveAsync(IEngineControl engine, PluginCardViewModel card)
+    /// <returns>What was granted, in the words the confirmation shows.</returns>
+    private static async Task<string> ApproveAsync(IEngineControl engine, PluginCardViewModel card)
     {
         var capabilities = new List<PluginCapability>();
 
@@ -194,17 +204,49 @@ public sealed partial class PluginsViewModel(EngineConnection connection) : Engi
             capabilities.Add(PluginCapability.ReadSensors);
         }
 
-        var fans = card.Fans
+        var granted = card.Fans
             .Where(fan => fan.Granted && fan.Claimable)
-            .Select(fan => fan.Id)
             .ToArray();
 
-        if (fans.Length > 0)
+        if (granted.Length > 0)
         {
             capabilities.Add(PluginCapability.ControlFans);
         }
 
-        await engine.ApprovePluginAsync(card.Id, [.. capabilities], [.. fans]).ConfigureAwait(true);
+        await engine
+            .ApprovePluginAsync(card.Id, [.. capabilities], [.. granted.Select(fan => fan.Id)])
+            .ConfigureAwait(true);
+
+        return Describe(card.GrantReadSensors, granted);
+    }
+
+    /// <summary>
+    /// Names every fan rather than counting them.
+    /// </summary>
+    /// <remarks>
+    /// "May drive 3 fans" is not a confirmation anybody can check. The whole value of saying it back
+    /// is that a user who ticked the wrong box can see they did.
+    /// </remarks>
+    private static string Describe(bool reads, GrantedFanViewModel[] fans)
+    {
+        var parts = new List<string>(2);
+
+        if (reads)
+        {
+            parts.Add("May read this machine's sensors");
+        }
+
+        parts.Add(fans.Length == 0
+            ? "may drive no fans"
+            : "may drive " + string.Join(", ", fans.Select(fan => fan.Name)));
+
+        // Only capitalised when the reads clause did not already open the sentence.
+        if (!reads)
+        {
+            parts[0] = char.ToUpperInvariant(parts[0][0]) + parts[0][1..];
+        }
+
+        return string.Join(", and ", parts) + ".";
     }
 
     private void OnPluginsChanged(object? sender, EventArgs e) => _ = RefreshAsync();

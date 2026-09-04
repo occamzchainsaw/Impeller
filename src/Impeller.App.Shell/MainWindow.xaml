@@ -6,6 +6,7 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:local="using:Impeller.App.Shell"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:notifications="using:Impeller.App.ViewModels.Notifications"
     Title="Impeller"
     mc:Ignorable="d">
 
@@ -21,6 +22,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="48" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <TitleBar
@@ -33,6 +35,116 @@
             <TitleBar.IconSource>
                 <ImageIconSource ImageSource="Assets/AppIcon.ico" />
             </TitleBar.IconSource>
+
+            <!--
+                The bell. A toast answers "something happened"; this answers "what was that message
+                I just missed", which is the question an InfoBar that has already been overwritten
+                cannot answer at all.
+            -->
+            <TitleBar.RightHeader>
+                <Button
+                    x:Name="HistoryButton"
+                    Width="40"
+                    Height="32"
+                    Margin="0,0,8,0"
+                    Padding="0"
+                    VerticalAlignment="Center"
+                    AutomationProperties.Name="Recent messages"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    ToolTipService.ToolTip="Recent messages">
+                    <Grid>
+                        <FontIcon FontSize="16" Glyph="&#xE7E7;" />
+
+                        <InfoBadge
+                            Margin="0,-8,-10,0"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Top"
+                            Value="{x:Bind Notifications.UnreadCount, Mode=OneWay}"
+                            Visibility="{x:Bind local:MainWindow.WhenAny(Notifications.UnreadCount), Mode=OneWay}" />
+                    </Grid>
+
+                    <Button.Flyout>
+                        <Flyout Opening="OnHistoryOpening" Placement="BottomEdgeAlignedRight">
+                            <Grid Width="420" RowSpacing="8">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+
+                                <Grid>
+                                    <TextBlock
+                                        VerticalAlignment="Center"
+                                        Style="{StaticResource BodyStrongTextBlockStyle}"
+                                        Text="Recent messages" />
+
+                                    <HyperlinkButton
+                                        Padding="4,0,4,0"
+                                        HorizontalAlignment="Right"
+                                        Click="OnClearHistory"
+                                        Content="Clear" />
+                                </Grid>
+
+                                <TextBlock
+                                    Grid.Row="1"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Text="Nothing has happened yet."
+                                    TextWrapping="Wrap"
+                                    Visibility="{x:Bind local:MainWindow.When(Notifications.IsEmpty), Mode=OneWay}" />
+
+                                <ListView
+                                    Grid.Row="2"
+                                    MaxHeight="420"
+                                    Margin="-12,0,-12,0"
+                                    ItemsSource="{x:Bind Notifications.History}"
+                                    SelectionMode="None">
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate x:DataType="notifications:ShellNotification">
+                                            <Grid Padding="0,8,0,8" ColumnSpacing="10">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+
+                                                <FontIcon
+                                                    VerticalAlignment="Top"
+                                                    FontSize="14"
+                                                    Foreground="{x:Bind local:MainWindow.BrushFor(Severity)}"
+                                                    Glyph="{x:Bind local:MainWindow.GlyphFor(Severity)}" />
+
+                                                <StackPanel Grid.Column="1">
+                                                    <TextBlock Text="{x:Bind Title}" TextWrapping="Wrap" />
+                                                    <TextBlock
+                                                        FontSize="12"
+                                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                        Text="{x:Bind Message}"
+                                                        TextWrapping="Wrap"
+                                                        Visibility="{x:Bind local:MainWindow.WhenText(Message)}" />
+                                                </StackPanel>
+
+                                                <StackPanel Grid.Column="2" HorizontalAlignment="Right">
+                                                    <TextBlock
+                                                        FontSize="12"
+                                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                        Text="{x:Bind AtText, Mode=OneWay}"
+                                                        TextAlignment="Right" />
+                                                    <TextBlock
+                                                        FontSize="12"
+                                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                        Text="{x:Bind CountText, Mode=OneWay}"
+                                                        TextAlignment="Right" />
+                                                </StackPanel>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                            </Grid>
+                        </Flyout>
+                    </Button.Flyout>
+                </Button>
+            </TitleBar.RightHeader>
         </TitleBar>
 
         <NavigationView
@@ -83,5 +195,81 @@
 
             <Frame x:Name="NavFrame" />
         </NavigationView>
+
+        <!--
+            Toasts, over the frame rather than in it, so a message raised on one page is still on
+            screen after navigating to another.
+        -->
+        <ItemsControl
+            Grid.Row="1"
+            Margin="0,12,20,0"
+            HorizontalAlignment="Right"
+            VerticalAlignment="Top"
+            ItemsSource="{x:Bind Toasts}">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="notifications:ShellNotification">
+                    <InfoBar
+                        Title="{x:Bind Title}"
+                        MinWidth="320"
+                        MaxWidth="440"
+                        Margin="0,0,0,8"
+                        CloseButtonClick="OnToastClosed"
+                        IsClosable="True"
+                        IsOpen="True"
+                        Message="{x:Bind Message}"
+                        Severity="{x:Bind local:MainWindow.SeverityFor(Severity)}" />
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <!--
+            Status, not news. Connection state, the configuration in force and how long since the
+            engine last spoke are true continuously and identical on every page, so they live once,
+            outside the frame, where they neither scroll away nor repeat.
+        -->
+        <Border
+            Grid.Row="2"
+            Padding="16,6,16,6"
+            Background="{ThemeResource LayerFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+            BorderThickness="0,1,0,0">
+            <Grid ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <Border
+                    Width="10"
+                    Height="10"
+                    VerticalAlignment="Center"
+                    Background="{x:Bind local:MainWindow.DotFor(Status.IsConnected, Status.IsStale), Mode=OneWay}"
+                    CornerRadius="5" />
+
+                <TextBlock
+                    Grid.Column="1"
+                    VerticalAlignment="Center"
+                    FontSize="12"
+                    Text="{x:Bind Status.StateText, Mode=OneWay}"
+                    ToolTipService.ToolTip="{x:Bind Status.ConnectionText, Mode=OneWay}" />
+
+                <TextBlock
+                    Grid.Column="2"
+                    VerticalAlignment="Center"
+                    FontSize="12"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="{x:Bind local:MainWindow.RunningLabel(Status.ConfigurationName), Mode=OneWay}"
+                    TextTrimming="CharacterEllipsis" />
+
+                <TextBlock
+                    Grid.Column="3"
+                    VerticalAlignment="Center"
+                    FontSize="12"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="{x:Bind Status.TickAgeText, Mode=OneWay}" />
+            </Grid>
+        </Border>
     </Grid>
 </Window>
