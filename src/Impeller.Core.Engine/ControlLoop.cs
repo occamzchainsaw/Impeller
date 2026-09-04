@@ -238,6 +238,20 @@ public sealed class ControlLoop
         _bindings.TryGetValue(controlId, out var binding) && binding.Enabled;
 
     /// <summary>
+    /// The sensor reporting this control's actual speed, or none when nothing is paired with it.
+    /// </summary>
+    /// <remarks>
+    /// Worth publishing rather than leaving each consumer to guess. The pairing is established by
+    /// measurement during calibration - drive a fan, see which tachometer moves - and no amount of
+    /// name matching reproduces that reliably across two backends that disagree about what to call
+    /// anything.
+    /// </remarks>
+    public SensorId GetPairedFanSensor(SensorId controlId) =>
+        _bindings.TryGetValue(controlId, out var binding)
+            ? binding.PairedFanSensorId
+            : SensorId.None;
+
+    /// <summary>
     /// Whether a plugin may hold this control: the engine drives it, and it has a curve to fall
     /// back to when the plugin lets go or dies.
     /// </summary>

@@ -1,4 +1,4 @@
-namespace Impeller.Plugins.Abstractions;
+﻿namespace Impeller.Plugins.Abstractions;
 
 /// <summary>
 /// What a sensor measures, and therefore what its number means.
@@ -94,6 +94,10 @@ public sealed record SensorInfo(
 /// <param name="Name">What the hardware calls it.</param>
 /// <param name="Provider">Which backend produced it.</param>
 /// <param name="HardwarePath">Diagnostic text. Not identity.</param>
+/// <param name="Tachometer">
+/// The sensor reporting this fan's actual speed, or <see cref="SensorRef.None"/> when the engine
+/// does not know of one.
+/// </param>
 /// <param name="RequestedDuty">
 /// What its current owner asked for, or null when nobody has asked for anything.
 /// </param>
@@ -106,11 +110,26 @@ public sealed record SensorInfo(
 /// configuration and has a curve to fall back to. A control that is not driven cannot be claimed:
 /// see <see cref="PluginAcquireFailure.NotDriven"/>.
 /// </param>
+/// <remarks>
+/// <para>
+/// <see cref="Tachometer"/> is here because the engine already knows the answer and a plugin
+/// cannot work it out. Impeller pairs a fan header with its tachometer during calibration, using
+/// measurements; a plugin can only guess from names, and the app this contract was designed
+/// against was doing exactly that - taking the control's identifier and replacing "control" with
+/// "fan". That works on one Super I/O chip and nowhere else.
+/// </para>
+/// <para>
+/// Subscribe to it like any other sensor. It requires <see cref="PluginCapability.ReadSensors"/> to
+/// read, but it is reported either way, so a settings window can say "you will get a speed readout
+/// once you allow reading" rather than showing an empty box.
+/// </para>
+/// </remarks>
 public sealed record ControlInfo(
     SensorRef Id,
     string Name,
     string Provider,
     string HardwarePath,
+    SensorRef Tachometer,
     float? RequestedDuty,
     float? CommandedDuty,
     ControlHolder Holder,

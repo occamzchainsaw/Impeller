@@ -474,6 +474,7 @@ public sealed partial class PluginHost : IAsyncDisposable
             control.Name,
             control.Fingerprint.ProviderId,
             control.Fingerprint.ToString(),
+            PluginTranslation.ToRef(Loop.GetPairedFanSensor(control.Id)),
             Loop.GetRequestedDuty(control.Id)?.Percent,
             Loop.GetCommandedDuty(control.Id)?.Percent,
             PluginTranslation.ToHolder(owner.Kind),

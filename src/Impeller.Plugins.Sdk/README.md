@@ -1,4 +1,4 @@
-# Impeller plugin SDK
+﻿# Impeller plugin SDK
 
 Write a program that asks the Impeller engine to drive a fan, instead of driving the hardware
 yourself.
@@ -103,6 +103,27 @@ timer is how a plugin ends up fighting a failsafe.
 Dying is a perfectly good way to release a fan. There is no cleanup you can fail to do, because you
 were never the thing writing to the hardware — the engine notices the pipe close and the fan is back
 on its curve within a tick. `ReleaseAsync` is politeness, not a requirement.
+
+## Reading a fan's speed
+
+Each control in `GetMachineAsync()` names the sensor that reports its actual RPM:
+
+```csharp
+var machine = await client.GetMachineAsync();
+var fan = machine!.Controls.First(control => control.Granted);
+
+if (!fan.Tachometer.IsNone)
+{
+    await client.SubscribeAsync([fan.Tachometer]);
+}
+```
+
+Do not try to work this out yourself. Impeller establishes the pairing by measurement during
+calibration — it drives a fan and watches which tachometer moves — and matching on names or on
+identifier strings gives a different, worse answer that happens to work on one motherboard.
+
+`SensorRef.None` means the engine genuinely does not know of one, which is a real state: not every
+header has a tachometer wired to it, and not every configuration has been calibrated.
 
 ## Reading sensors
 

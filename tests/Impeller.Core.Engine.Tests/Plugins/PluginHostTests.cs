@@ -540,6 +540,36 @@ public sealed class PluginHostTests
     }
 
     [Fact]
+    public async Task A_snapshot_names_the_tachometer_paired_with_each_fan()
+    {
+        // The engine establishes this by measurement during calibration. A plugin can only guess
+        // from names, and the app this contract was designed against was doing exactly that - so
+        // withholding it meant every plugin reinventing a worse version of an answer we already had.
+        await using var rig = new Rig();
+        rig.Pair();
+
+        await using var plug = rig.Connect();
+        await rig.AdmitAndGrantAsync(plug);
+
+        var control = Assert.Single((await plug.Engine.GetSensorsAsync()).Controls);
+
+        Assert.Equal(rig.TempRef, control.Tachometer);
+    }
+
+    [Fact]
+    public async Task A_fan_with_no_tachometer_says_so_rather_than_naming_the_wrong_one()
+    {
+        await using var rig = new Rig();
+
+        await using var plug = rig.Connect();
+        await rig.AdmitAndGrantAsync(plug);
+
+        var control = Assert.Single((await plug.Engine.GetSensorsAsync()).Controls);
+
+        Assert.True(control.Tachometer.IsNone);
+    }
+
+    [Fact]
     public async Task A_snapshot_says_which_fans_are_granted_and_which_are_claimable()
     {
         await using var rig = new Rig();
@@ -699,7 +729,7 @@ public sealed class PluginHostTests
 
         public float Commanded => Loop.GetCommandedDuty(Fan.Id)!.Value.Percent;
 
-        public void Configure(bool enabled = true, bool withCurve = true) =>
+        public void Configure(bool enabled = true, bool withCurve = true, bool paired = false) =>
             Loop.Configure(
                 [Curve],
                 [
@@ -710,8 +740,12 @@ public sealed class PluginHostTests
                         MinimumDuty = new Duty(35f),
                         MaximumStepUpPerSecond = 0f,
                         MaximumStepDownPerSecond = 0f,
+                        PairedFanSensorId = paired ? Temperature.Id : SensorId.None,
                     },
                 ]);
+
+        /// <summary>Pairs a sensor with the fan, the way calibration does.</summary>
+        public void Pair() => Configure(paired: true);
 
         /// <summary>Opens a connection and hands back the plugin end of it.</summary>
         public Plug Connect()

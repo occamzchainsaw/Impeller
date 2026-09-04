@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Text.Json;
 using Impeller.Plugins.Abstractions;
 using Nerdbank.Streams;
@@ -489,12 +489,15 @@ public sealed class PluginContractsTests : IAsyncDisposable
                         "lhm", "lhm/lpc/nct6687d/0/fan/7", null),
                 ],
                 [
+                    // One with a tachometer paired to it and one without, because the pairing is a
+                    // value a plugin cannot work out for itself and an absent one has to be
+                    // distinguishable from a present one.
                     new ControlInfo(
                         GrantedFan, "Fan #4", "lhm", "lhm/lpc/nct6687d/0/control/4",
-                        30f, 45f, ControlHolder.Curve, null, true, true),
+                        QuietSensor, 30f, 45f, ControlHolder.Curve, null, true, true),
                     new ControlInfo(
                         UndrivenFan, "Fan #5", "lhm", "lhm/lpc/nct6687d/0/control/5",
-                        null, null, ControlHolder.Curve, null, true, false),
+                        SensorRef.None, null, null, ControlHolder.Curve, null, true, false),
                 ]));
         }
 

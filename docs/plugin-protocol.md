@@ -1,4 +1,4 @@
-# The Impeller plugin protocol
+﻿# The Impeller plugin protocol
 
 Reference for the wire contract between the engine and a plugin.
 
@@ -109,6 +109,12 @@ app may drive *that* fan".
 `GetSensorsAsync` lists every control whether or not you were granted it, so your settings window
 can offer the user a fan to pick before they have granted it. **Listing is not permission.** Claiming
 an ungranted control returns `NotPermitted`.
+
+Each listed control also carries `Tachometer` — the sensor reporting that fan's real speed, or
+`SensorRef.None`. The engine works the pairing out by measurement during calibration, so this is an
+answer no plugin can reproduce from names or identifier strings. Reported whether or not
+`ReadSensors` was granted, since knowing the id costs nothing and lets a settings window explain
+why a speed readout is missing; subscribing to it still needs the grant.
 
 ## Claiming a fan
 
