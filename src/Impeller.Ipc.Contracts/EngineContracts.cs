@@ -58,6 +58,16 @@ public sealed record SensorDescriptor(
 /// <param name="SupportsAutomaticMode">Whether it can be handed back to its own firmware.</param>
 /// <param name="Owner">What sort of claimant is driving it.</param>
 /// <param name="ClaimantId">Which specific claimant, where that means anything.</param>
+/// <param name="Claimable">
+/// Whether a plugin may be granted this fan: the engine drives it, and it has a curve to fall back
+/// to when the plugin lets go or dies.
+/// </param>
+/// <remarks>
+/// <paramref name="Claimable"/> is the engine's own answer, not an approximation of it. The rule
+/// lives in the tick loop, and a shell re-deriving it from a commanded duty gets it wrong for
+/// exactly the fan someone is most likely to try: one switched on and pinned by hand, with no
+/// curve behind it.
+/// </remarks>
 public sealed record ControlDescriptor(
     SensorId Id,
     string Name,
@@ -66,7 +76,8 @@ public sealed record ControlDescriptor(
     Duty? CommandedDuty,
     bool SupportsAutomaticMode,
     ControlOwnerKind Owner,
-    string? ClaimantId);
+    string? ClaimantId,
+    bool Claimable);
 
 /// <summary>Everything the shell needs to draw itself from a standing start.</summary>
 /// <param name="Status">Engine health.</param>

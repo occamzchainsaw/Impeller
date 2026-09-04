@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Impeller.App.ViewModels.Engine;
@@ -28,8 +28,6 @@ namespace Impeller.App.ViewModels;
 /// </remarks>
 public sealed partial class PluginsViewModel(EngineConnection connection) : EnginePageViewModel(connection)
 {
-    private IReadOnlyList<ControlDescriptor> _controls = [];
-
     /// <inheritdoc />
     public override string Title => "Plugins";
 
@@ -63,14 +61,10 @@ public sealed partial class PluginsViewModel(EngineConnection connection) : Engi
 
     /// <inheritdoc />
     /// <remarks>
-    /// A configuration change can make a fan claimable or stop it being claimable, so the tick
-    /// boxes are rebuilt against the new one rather than left describing the old.
+    /// A configuration change can make a fan claimable or stop it being claimable, so the rows are
+    /// rebuilt against the new one rather than left describing the old.
     /// </remarks>
-    protected override void OnSnapshot(EngineSnapshot snapshot)
-    {
-        _controls = snapshot.Controls;
-        _ = RefreshAsync();
-    }
+    protected override void OnSnapshot(EngineSnapshot snapshot) => _ = RefreshAsync();
 
     /// <summary>Asks the engine what it knows and rebuilds the list.</summary>
     [RelayCommand]
@@ -86,11 +80,28 @@ public sealed partial class PluginsViewModel(EngineConnection connection) : Engi
         {
             var summaries = await engine.ListPluginsAsync().ConfigureAwait(true);
 
-            Plugins.Clear();
+            var ordered = summaries.OrderByDescending(entry => entry.FirstSeenAt).ToArray();
 
-            foreach (var summary in summaries.OrderByDescending(entry => entry.FirstSeenAt))
+            // Updated in place where the plugin is already on screen, rather than cleared and
+            // rebuilt. A plugin reconnecting announces a change, and rebuilding would wipe the
+            // boxes the user was in the middle of ticking - which, on the one page whose whole
+            // purpose is ticking boxes, is not a small annoyance.
+            if (ordered.Length == Plugins.Count
+                && ordered.Zip(Plugins).All(pair => pair.First.Id == pair.Second.Id))
             {
-                Plugins.Add(new PluginCardViewModel(summary, FansFor(summary), ActAsync));
+                foreach (var (summary, card) in ordered.Zip(Plugins))
+                {
+                    card.Update(summary, FansFor(summary));
+                }
+            }
+            else
+            {
+                Plugins.Clear();
+
+                foreach (var summary in ordered)
+                {
+                    Plugins.Add(new PluginCardViewModel(summary, FansFor(summary), ActAsync));
+                }
             }
 
             IsEmpty = Plugins.Count == 0;
@@ -104,25 +115,22 @@ public sealed partial class PluginsViewModel(EngineConnection connection) : Engi
     }
 
     /// <summary>The fans this plugin could have, with the ones it does have ticked.</summary>
-    private IEnumerable<GrantedFanViewModel> FansFor(PluginSummary summary) =>
-        _controls.Select(control => new GrantedFanViewModel(
-            control.Id,
-            control.Name,
-            summary.Controls.Contains(control.Id),
-
-            // Mirrored here only to grey the box out and say why. The engine applies the same rule
-            // and refuses regardless, so a stale view costs a refusal rather than a bad grant.
-            IsClaimable(control)));
-
-    /// <summary>
-    /// Whether a fan is one a plugin could be given.
-    /// </summary>
     /// <remarks>
-    /// The shell cannot see the binding directly, but a control the engine is driving reports a
-    /// commanded duty and one it is not reports none. That is enough to grey the box, which is all
-    /// this has to do — the engine holds the real rule.
+    /// Read from the connection at the moment of use rather than cached from a snapshot event, so a
+    /// page opened before the first snapshot arrives is not left with an empty list it never fills.
     /// </remarks>
-    private static bool IsClaimable(ControlDescriptor control) => control.CommandedDuty is not null;
+    private IEnumerable<GrantedFanViewModel> FansFor(PluginSummary summary) =>
+        (Connection.Snapshot?.Controls ?? [])
+            .Select(control => new GrantedFanViewModel(
+                control.Id,
+                control.Name,
+                summary.Controls.Contains(control.Id),
+
+                // The engine's own answer, carried on the descriptor. Deriving it here from a
+                // commanded duty was wrong in both directions: it enabled a fan that is pinned by
+                // hand but has no curve, and it would have disabled one the engine had not yet
+                // written to.
+                control.Claimable));
 
     private async Task ActAsync(PluginCardViewModel card, PluginAction action)
     {

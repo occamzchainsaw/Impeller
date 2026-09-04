@@ -1,4 +1,4 @@
-using Impeller.Core.Abstractions;
+﻿using Impeller.Core.Abstractions;
 using Impeller.Core.Abstractions.Configuration;
 using Impeller.Ipc.Contracts;
 
@@ -48,7 +48,8 @@ public class DiagnosticReportTests
                 new Duty(55f),
                 SupportsAutomaticMode: true,
                 ControlOwnerKind.ManualOverride,
-                "shell"),
+                "shell",
+                Claimable: false),
         ],
         ConfigurationName = "Imported",
         Validation = new ConfigurationValidation(

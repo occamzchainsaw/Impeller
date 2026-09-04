@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Impeller.Core.Abstractions;
@@ -58,6 +58,8 @@ public sealed partial class PluginCardViewModel : ObservableObject
 {
     private readonly Func<PluginCardViewModel, PluginAction, Task> _act;
 
+    private PluginSummary _summary;
+
     public PluginCardViewModel(
         PluginSummary summary,
         IEnumerable<GrantedFanViewModel> fans,
@@ -67,7 +69,7 @@ public sealed partial class PluginCardViewModel : ObservableObject
         ArgumentNullException.ThrowIfNull(act);
 
         _act = act;
-        Summary = summary;
+        _summary = summary;
         Id = summary.Id;
 
         foreach (var fan in fans)
@@ -78,11 +80,62 @@ public sealed partial class PluginCardViewModel : ObservableObject
         WantsReadSensors = summary.Granted.Contains(PluginCapability.ReadSensors)
             || summary.Requested.Contains(PluginCapability.ReadSensors);
 
+        HasFans = Fans.Count > 0;
+
         GrantReadSensors = summary.Granted.Contains(PluginCapability.ReadSensors);
     }
 
     /// <summary>The engine's word on this plugin.</summary>
-    public PluginSummary Summary { get; }
+    public PluginSummary Summary => _summary;
+
+    /// <summary>
+    /// Takes a fresh answer from the engine without disturbing what the user is doing.
+    /// </summary>
+    /// <remarks>
+    /// The tick boxes are re-seeded only when the engine's own grants have changed. Otherwise they
+    /// are left exactly as the user set them, because a plugin reconnecting in the background is
+    /// not a reason to undo half a decision.
+    /// </remarks>
+    public void Update(PluginSummary summary, IEnumerable<GrantedFanViewModel> fans)
+    {
+        ArgumentNullException.ThrowIfNull(summary);
+
+        var grantsChanged = !summary.Granted.SequenceEqual(_summary.Granted)
+            || !summary.Controls.SequenceEqual(_summary.Controls);
+
+        _summary = summary;
+
+        OnPropertyChanged(nameof(Summary));
+        OnPropertyChanged(nameof(DisplayName));
+        OnPropertyChanged(nameof(Version));
+        OnPropertyChanged(nameof(IsConnected));
+        OnPropertyChanged(nameof(IsEnabled));
+        OnPropertyChanged(nameof(NeedsAnswer));
+        OnPropertyChanged(nameof(StateText));
+        OnPropertyChanged(nameof(GrantsText));
+        OnPropertyChanged(nameof(ProgramText));
+
+        var replacements = fans.ToArray();
+
+        // Rebuilt when the shape of the machine changed - a fan appearing, or becoming claimable -
+        // or when the engine's grants moved under us. A plain reconnect changes neither.
+        if (grantsChanged
+            || replacements.Length != Fans.Count
+            || !replacements.Zip(Fans).All(pair =>
+                pair.First.Id == pair.Second.Id && pair.First.Claimable == pair.Second.Claimable))
+        {
+            Fans.Clear();
+
+            foreach (var fan in replacements)
+            {
+                Fans.Add(fan);
+            }
+
+            HasFans = Fans.Count > 0;
+            OnPropertyChanged(nameof(HasFans));
+            GrantReadSensors = summary.Granted.Contains(PluginCapability.ReadSensors);
+        }
+    }
 
     /// <summary>The manifest id. Shown small, because it is a key rather than a name.</summary>
     public string Id { get; }
@@ -111,6 +164,13 @@ public sealed partial class PluginCardViewModel : ObservableObject
 
     /// <summary>The fans, with a tick against the ones this plugin has.</summary>
     public ObservableCollection<GrantedFanViewModel> Fans { get; } = [];
+
+    /// <summary>Whether there are any fans to show at all.</summary>
+    /// <remarks>
+    /// An empty list needs a sentence rather than an empty box. It means the shell has not received
+    /// the machine's controls yet, and saying so beats leaving someone staring at nothing.
+    /// </remarks>
+    public bool HasFans { get; private set; }
 
     /// <summary>Whether a request to the engine is in flight.</summary>
     [ObservableProperty]

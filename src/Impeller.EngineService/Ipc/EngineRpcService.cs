@@ -503,7 +503,8 @@ public sealed class EngineRpcService(
             loop.GetCommandedDuty(control.Id) ?? control.CommandedDuty,
             control.SupportsAutomaticMode,
             owner.Kind,
-            owner.ClaimantId);
+            owner.ClaimantId,
+            loop.CanBeHeldByPlugin(control.Id));
     }
 
     private static ControlAcquireOutcome Refused(ControlAcquireFailure failure, ControlOwner? current) =>

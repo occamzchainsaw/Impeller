@@ -347,7 +347,7 @@ public sealed class EngineContractsTests : IAsyncDisposable
             [
                 new ControlDescriptor(
                     FanControl, "Fan #4", "lhm", "lhm/lpc/nct6687d/0/control/4",
-                    new Duty(55f), false, ControlOwnerKind.Curve, null),
+                    new Duty(55f), false, ControlOwnerKind.Curve, null, Claimable: true),
             ],
             "Default",
             new ImpellerConfiguration
