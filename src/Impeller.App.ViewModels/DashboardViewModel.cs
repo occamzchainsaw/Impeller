@@ -180,6 +180,42 @@ public sealed partial class DashboardViewModel(EngineConnection connection, Noti
     }
 
     /// <summary>
+    /// Brings the bound collection to match, touching only what actually moved.
+    /// </summary>
+    /// <remarks>
+    /// Clearing it and adding everything back was correct and unusable. An <c>ItemsRepeater</c>
+    /// tears down every realised element when its source is emptied, so a card the user was in the
+    /// middle of using was destroyed and rebuilt under their hands — and the engine announces a
+    /// configuration change every time a manual duty is recorded, which while dragging a slider is
+    /// four times a second. The slider lost focus, so the drag ended.
+    /// </remarks>
+    private void Reconcile(List<ControlCardViewModel> wanted)
+    {
+        for (var index = Controls.Count - 1; index >= 0; index--)
+        {
+            if (!wanted.Contains(Controls[index]))
+            {
+                Controls.RemoveAt(index);
+            }
+        }
+
+        for (var index = 0; index < wanted.Count; index++)
+        {
+            var card = wanted[index];
+            var at = Controls.IndexOf(card);
+
+            if (at < 0)
+            {
+                Controls.Insert(index, card);
+            }
+            else if (at != index)
+            {
+                Controls.Move(at, index);
+            }
+        }
+    }
+
+    /// <summary>
     /// Rebuilds the list of cards, keeping the ones that are still here.
     /// </summary>
     /// <remarks>
@@ -191,8 +227,7 @@ public sealed partial class DashboardViewModel(EngineConnection connection, Noti
     {
         var present = snapshot.Controls.ToDictionary(descriptor => descriptor.Id);
         var configured = new HashSet<SensorId>();
-
-        Controls.Clear();
+        var wanted = new List<ControlCardViewModel>(snapshot.Configuration.Controls.Count);
 
         foreach (var binding in snapshot.Configuration.Controls)
         {
@@ -215,7 +250,7 @@ public sealed partial class DashboardViewModel(EngineConnection connection, Noti
                         null);
                 }
 
-                Controls.Add(existing);
+                wanted.Add(existing);
                 continue;
             }
 
@@ -228,8 +263,10 @@ public sealed partial class DashboardViewModel(EngineConnection connection, Noti
                 NameClaimant);
 
             _cards[binding.ControlId] = card;
-            Controls.Add(card);
+            wanted.Add(card);
         }
+
+        Reconcile(wanted);
 
         // A card for a binding that is no longer in the configuration is dropped, and its writer
         // with it — otherwise a removed fan keeps a rate limiter alive for the life of the window.

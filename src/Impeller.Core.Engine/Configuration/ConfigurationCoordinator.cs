@@ -186,9 +186,18 @@ public sealed class ConfigurationCoordinator(
     /// Records that a control has been pinned by hand, or released, and saves.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Deliberately not a full apply. The loop already holds the live claim by the time this is
     /// called, so re-applying would rebuild every curve to write one number — and would reset the
     /// state of any curve that keeps its own, which is most of the interesting ones.
+    /// </para>
+    /// <para>
+    /// Deliberately not announced either, for the same reason one step further on. A dragged slider
+    /// records a duty several times a second, and every client answers a configuration change by
+    /// re-reading the whole snapshot. The live facts — who holds the control and what duty stands
+    /// at it — are on every tick already, so the announcement bought nothing and cost the user
+    /// their grip on the slider.
+    /// </para>
     /// </remarks>
     /// <returns>Whether the configuration named that control at all.</returns>
     public bool RecordManualDuty(SensorId controlId, Duty? duty)
@@ -219,8 +228,6 @@ public sealed class ConfigurationCoordinator(
 
         Current = Current with { Controls = [.. controls] };
         Save(Current);
-
-        Changed?.Invoke(this, new ConfigurationChanged(CurrentName, Current, LastValidation));
         return true;
     }
 
