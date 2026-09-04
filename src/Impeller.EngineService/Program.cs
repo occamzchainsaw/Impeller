@@ -1,4 +1,5 @@
-﻿using Impeller.Core.Abstractions;
+﻿using System.Reflection;
+using Impeller.Core.Abstractions;
 using Impeller.Core.Engine;
 using Impeller.Core.Engine.Configuration;
 using Impeller.Core.Engine.Sensors;
@@ -7,6 +8,7 @@ using Impeller.Core.Persistence;
 using Impeller.EngineService;
 using Impeller.EngineService.Ipc;
 using Impeller.Hardware.Lhm;
+using Impeller.Plugins.Host;
 using Microsoft.Extensions.Logging.EventLog;
 using Microsoft.Extensions.Options;
 using Serilog;
@@ -129,11 +131,31 @@ builder.Services.AddSingleton<EngineReadiness>();
 builder.Services.AddSingleton<TuningCoordinator>();
 builder.Services.AddSingleton<EngineRpcService>();
 
+// The plugin channel. The registry is the approval model and holds no connections; the host owns
+// the connections and holds no policy. Both are built here so the pipe listener can stay a thin
+// accept loop.
+builder.Services.AddSingleton(new PluginStore(statePaths.PluginsPath));
+builder.Services.AddSingleton<PluginRegistry>();
+
+builder.Services.AddSingleton(sp => new PluginHost(
+    sp.GetRequiredService<ISensorRegistry>(),
+    sp.GetRequiredService<ControlLoop>(),
+    sp.GetRequiredService<ControlOwnershipRegistry>(),
+    sp.GetRequiredService<PluginRegistry>(),
+    Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0",
+    sp.GetRequiredService<TimeProvider>(),
+    logger: sp.GetRequiredService<ILogger<PluginHost>>()));
+
 builder.Services.AddHostedService<EngineWorker>();
 
 // Registered after the worker so the first client to connect finds a configured engine rather
 // than one still enumerating hardware.
 builder.Services.AddHostedService<EngineRpcHost>();
+
+// Registered last, so that it stops first: hosted services stop in reverse order, and plugins
+// should be told the engine is going - and let go of their fans - while the window is still
+// connected and before the failsafe runs.
+builder.Services.AddHostedService<PluginRpcHost>();
 
 var host = builder.Build();
 

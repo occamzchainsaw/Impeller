@@ -1,4 +1,4 @@
-using Impeller.Core.Persistence;
+﻿using Impeller.Core.Persistence;
 
 namespace Impeller.EngineService;
 
@@ -18,4 +18,15 @@ public sealed record EngineStatePaths(string ConfigurationRoot, bool Portable)
 
     /// <summary>Where the choice of configuration is remembered across restarts.</summary>
     public string SelectionPath { get; init; } = StateLocation.ResolveSelection(ConfigurationRoot);
+
+    /// <summary>
+    /// Which programs may drive this machine's fans. Installation state, not user state.
+    /// </summary>
+    /// <remarks>
+    /// Beside the configurations rather than among them, for the reason Phase 1 established the
+    /// hard way: anything ending in <c>.json</c> inside that folder is offered to the user as a
+    /// configuration they could load. A configuration copied to another machine must also not
+    /// carry this machine's plugin approvals with it.
+    /// </remarks>
+    public string PluginsPath { get; init; } = StateLocation.ResolvePlugins(ConfigurationRoot);
 }

@@ -1,4 +1,4 @@
-using System.IO.Pipes;
+﻿using System.IO.Pipes;
 using System.Runtime.Versioning;
 using Impeller.Ipc.Contracts;
 using StreamJsonRpc;
@@ -98,8 +98,18 @@ public sealed partial class EngineRpcHost(
         {
             stream = EnginePipe.Create();
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (UnauthorizedAccessException ex)
         {
+            // Something else owns this name, which will not fix itself. Treated as transient it
+            // would be retried silently for the machine's uptime while a squatter served whatever
+            // it liked to the shell, and the only symptom would be "the engine is not running".
+            Log.PipeTaken(logger, ImpellerPipe.Name, ex);
+            await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken).ConfigureAwait(false);
+            return;
+        }
+        catch (IOException ex)
+        {
+            // The ordinary cause is a stale instance still closing.
             Log.PipeUnavailable(logger, ex);
             await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ConfigureAwait(false);
             return;
@@ -273,6 +283,14 @@ public sealed partial class EngineRpcHost(
             Level = LogLevel.Warning,
             Message = "Could not open the listening pipe; retrying shortly.")]
         public static partial void PipeUnavailable(ILogger logger, Exception exception);
+
+        [LoggerMessage(
+            EventId = 27,
+            Level = LogLevel.Error,
+            Message = "The name {PipeName} is owned by another process, so the Impeller window cannot "
+                + "reach this engine and may be talking to something else. Find and close whatever "
+                + "holds it.")]
+        public static partial void PipeTaken(ILogger logger, string pipeName, Exception exception);
 
         [LoggerMessage(
             EventId = 26,

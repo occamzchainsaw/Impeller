@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
@@ -6,8 +6,8 @@
     <Nullable>enable</Nullable>
 
     <!--
-      Required by [LibraryImport], which generates the marshalling code. There is no hand-written
-      unsafe code in this project.
+      Required by [LibraryImport], which generates the marshalling code, and by the one hand-written
+      unsafe block: a stack buffer handed to QueryFullProcessImageName.
     -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
