@@ -59,7 +59,7 @@ public sealed partial class SensorsPage : Page
             // The overload with a search root is not optional: the one-argument TryMoveFocus is
             // unsupported in a WinUI Desktop app and throws a catastrophic-failure COMException
             // out of an async void handler, which takes the whole shell down. It did.
-            if (!MoveFocusOut())
+            if (!MoveFocusOut(box))
             {
                 await item.RenameCommand.ExecuteAsync(null);
             }
@@ -69,6 +69,10 @@ public sealed partial class SensorsPage : Page
             e.Handled = true;
             item.IsRenaming = false;
             box.Text = item.Name;
+
+            // Leaves the field too, for the same reason Enter does: abandoning an edit and being
+            // left with the caret still blinking in it says nothing happened.
+            MoveFocusOut(box);
         }
     }
 
@@ -90,20 +94,44 @@ public sealed partial class SensorsPage : Page
     /// </summary>
     /// <returns>Whether focus actually moved.</returns>
     /// <remarks>
-    /// Guarded, because failing to move focus is a cosmetic disappointment and throwing out of a
-    /// keystroke handler is a closed application.
+    /// <para>
+    /// Handing the job to something in the same row rather than asking the focus manager to find
+    /// the next element. <c>TryMoveFocus</c> answered false from inside the repeater and moved
+    /// nothing, so the rename went through and the caret stayed sitting in the box — which looks
+    /// exactly like Enter having done nothing at all, and was reported as such twice.
+    /// </para>
+    /// <para>
+    /// Focused as though by the pointer, which is the one focus state that draws no focus visual.
+    /// Programmatic still rings the target, and lighting up the Identify button because somebody
+    /// finished renaming a fan points at the wrong thing entirely.
+    /// </para>
     /// </remarks>
-    private bool MoveFocusOut()
+    private static bool MoveFocusOut(FrameworkElement box)
     {
         try
         {
-            return Content is DependencyObject root
+            if (box.Parent is Panel row)
+            {
+                foreach (var sibling in row.Children)
+                {
+                    if (!ReferenceEquals(sibling, box)
+                        && sibling is Control control
+                        && control.Focus(FocusState.Pointer))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return box.XamlRoot?.Content is DependencyObject root
                 && FocusManager.TryMoveFocus(
                     FocusNavigationDirection.Next,
                     new FindNextElementOptions { SearchRoot = root });
         }
         catch (Exception)
         {
+            // Failing to move focus is a cosmetic disappointment. Throwing out of a keystroke
+            // handler is a closed application, and this shell has already done that once.
             return false;
         }
     }
