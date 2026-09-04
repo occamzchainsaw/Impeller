@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <!--
     The engine side of the plugin channel. It sees both vocabularies - the engine's and the
@@ -6,7 +6,13 @@
     Impeller.Plugins.Abstractions referencing nothing.
   -->
   <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
+    <PackageReference Include="StreamJsonRpc" Version="2.25.29" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Impeller.Core.Abstractions\Impeller.Core.Abstractions.csproj" />
+    <ProjectReference Include="..\Impeller.Core.Engine\Impeller.Core.Engine.csproj" />
     <ProjectReference Include="..\Impeller.Core.Persistence\Impeller.Core.Persistence.csproj" />
     <ProjectReference Include="..\Impeller.Plugins.Abstractions\Impeller.Plugins.Abstractions.csproj" />
   </ItemGroup>

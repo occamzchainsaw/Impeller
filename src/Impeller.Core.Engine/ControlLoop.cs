@@ -318,6 +318,30 @@ public sealed class ControlLoop
         _commandedDuties.TryGetValue(controlId, out var duty) ? duty : null;
 
     /// <summary>
+    /// The duty the control's current owner last asked for, or null when nobody has asked for one.
+    /// </summary>
+    /// <remarks>
+    /// Not the same number as <see cref="GetCommandedDuty"/>, and the difference is the whole point:
+    /// the binding's limits, its avoided bands and its slew limiter all sit between them. A claimant
+    /// shown only the commanded duty cannot tell "my request was adjusted" from "my request never
+    /// arrived", and one shown only its own request cannot tell that the fan is somewhere else
+    /// entirely. Both are published so a plugin's window can be honest about which is which.
+    /// </remarks>
+    public Duty? GetRequestedDuty(SensorId controlId)
+    {
+        var owner = _ownership.GetOwner(controlId);
+
+        lock (_requestGate)
+        {
+            // Stamp-checked exactly as the tick loop checks it, so a request left behind by a
+            // previous owner is never reported as the current one's.
+            return _requestedDuties.TryGetValue(controlId, out var requested) && requested.BelongsTo(owner)
+                ? requested.Duty
+                : null;
+        }
+    }
+
+    /// <summary>
     /// Drives every control to its failsafe duty and holds it there.
     /// </summary>
     /// <remarks>
