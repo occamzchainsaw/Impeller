@@ -1,4 +1,4 @@
-<Solution>
+﻿<Solution>
   <Folder Name="/src/">
     <Project Path="src/Impeller.App.Shell/Impeller.App.Shell.csproj" />
     <Project Path="src/Impeller.App.ViewModels/Impeller.App.ViewModels.csproj" />
@@ -11,6 +11,7 @@
     <Project Path="src/Impeller.Platform.Windows/Impeller.Platform.Windows.csproj" />
     <Project Path="src/Impeller.Plugins.Abstractions/Impeller.Plugins.Abstractions.csproj" />
     <Project Path="src/Impeller.Plugins.Host/Impeller.Plugins.Host.csproj" />
+    <Project Path="src/Impeller.Plugins.Sdk/Impeller.Plugins.Sdk.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Impeller.Core.Engine.Tests/Impeller.Core.Engine.Tests.csproj" />

@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <!--
     Deliberately references nothing.
@@ -15,6 +15,20 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <!--
+    Packed separately from the SDK rather than folded into it, because it is genuinely a separate
+    thing: the SDK is one implementation of this contract, and someone writing a plugin in another
+    language - or with their own transport - needs the wire vocabulary without the client.
+  -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Impeller.Plugins.Abstractions</PackageId>
+    <Title>Impeller plugin contracts</Title>
+    <Description>The wire contract between the Impeller engine and a plugin: manifest, capabilities, admission, and the two JSON-RPC interfaces. References nothing. Most authors want Impeller.Plugins.Sdk instead.</Description>
+    <PackageTags>impeller;fan;fancontrol;hardware;plugin</PackageTags>
+    <Version>0.1.0</Version>
   </PropertyGroup>
 
 </Project>

@@ -9,6 +9,8 @@ using Impeller.Core.Engine.Tuning;
 using Impeller.Core.Persistence.Diagnostics;
 using Impeller.Core.Persistence.Legacy;
 using Impeller.Ipc.Contracts;
+using Impeller.Plugins.Abstractions;
+using Impeller.Plugins.Host;
 
 namespace Impeller.EngineService.Ipc;
 
@@ -37,7 +39,9 @@ public sealed class EngineRpcService(
     EngineWorkerState workerState,
     TuningCoordinator tuning,
     EngineNotifications notifications,
-    ISensorIdentityMap identityMap) : IEngineControl
+    ISensorIdentityMap identityMap,
+    PluginRegistry plugins,
+    PluginHost pluginHost) : IEngineControl
 {
     /// <summary>Who the engine records as holding a manually overridden control.</summary>
     public const string ManualClaimant = ControlOwnershipRegistry.ManualClaimant;
@@ -377,7 +381,67 @@ public sealed class EngineRpcService(
             Configuration = coordinator.Current,
             Validation = coordinator.LastValidation,
             RecentLog = [.. LogFiles.Tail(paths.LogRoot, "engine-*.log")],
+            Plugins = [.. plugins.All.Select(Summarise)],
         });
+
+    /// <inheritdoc />
+    public Task<EquatableArray<PluginSummary>> ListPluginsAsync(
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<EquatableArray<PluginSummary>>([.. plugins.All.Select(Summarise)]);
+
+    /// <inheritdoc />
+    public Task<bool> ApprovePluginAsync(
+        string pluginId,
+        EquatableArray<PluginCapability> capabilities,
+        EquatableArray<SensorId> controls,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(plugins.Approve(pluginId, capabilities, controls));
+
+    /// <inheritdoc />
+    public Task<bool> GrantPluginControlAsync(
+        string pluginId,
+        SensorId controlId,
+        CancellationToken cancellationToken = default) =>
+        // Refused rather than stored, because a grant on a fan the engine is not driving is a
+        // permission that fails the first time it is used, and the user would have no idea why.
+        Task.FromResult(loop.CanBeHeldByPlugin(controlId) && plugins.Grant(pluginId, controlId));
+
+    /// <inheritdoc />
+    public Task<bool> RevokePluginControlAsync(
+        string pluginId,
+        SensorId controlId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(plugins.Revoke(pluginId, controlId));
+
+    /// <inheritdoc />
+    public Task<bool> SetPluginEnabledAsync(
+        string pluginId,
+        bool enabled,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(plugins.SetEnabled(pluginId, enabled));
+
+    /// <inheritdoc />
+    public Task<bool> ForgetPluginAsync(
+        string pluginId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(plugins.Forget(pluginId));
+
+    /// <summary>One stored plugin record, plus the two things about it that are not stored.</summary>
+    private PluginSummary Summarise(PluginRecord record) => new(
+        record.Id,
+        record.DisplayName,
+        record.Version,
+        record.State,
+        record.Enabled,
+        pluginHost.Find(record.Id) is not null,
+        [.. record.Requested],
+        [.. record.Capabilities],
+        [.. record.Controls],
+        record.LastSeen.ImagePath,
+        record.LastSeen.UserSid,
+        !record.IdentityHolds,
+        record.FirstSeenAt,
+        record.LastSeenAt);
 
     private static ProviderDiagnostics DescribeProvider(
         (ISensorProvider Provider, ProviderInitializationResult? Result) entry) => new(

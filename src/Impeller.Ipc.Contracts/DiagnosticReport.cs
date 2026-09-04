@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text;
 using Impeller.Core.Abstractions;
 using Impeller.Core.Abstractions.Configuration;
@@ -70,6 +70,16 @@ public sealed record DiagnosticReport
 
     /// <summary>Every sensor the engine can currently see, with its latest reading.</summary>
     public EquatableArray<SensorDescriptor> Sensors { get; init; } = [];
+
+    /// <summary>
+    /// Every plugin the engine has seen, with what it was granted and whether it is connected.
+    /// </summary>
+    /// <remarks>
+    /// Without this the first bug report involving a plugin is unanswerable: "my fan went to full
+    /// speed" has a completely different cause depending on whether something else was holding that
+    /// fan at the time, and nothing else in this report would say so.
+    /// </remarks>
+    public EquatableArray<PluginSummary> Plugins { get; init; } = [];
 
     /// <summary>Every control, with what is driving it.</summary>
     public EquatableArray<ControlDescriptor> Controls { get; init; } = [];

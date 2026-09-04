@@ -24,6 +24,7 @@
     <ProjectReference Include="..\..\src\Impeller.Ipc.Contracts\Impeller.Ipc.Contracts.csproj" />
     <ProjectReference Include="..\..\src\Impeller.Plugins.Abstractions\Impeller.Plugins.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\Impeller.Plugins.Host\Impeller.Plugins.Host.csproj" />
+    <ProjectReference Include="..\..\src\Impeller.Plugins.Sdk\Impeller.Plugins.Sdk.csproj" />
     <ProjectReference Include="..\..\src\Impeller.App.ViewModels\Impeller.App.ViewModels.csproj" />
   </ItemGroup>
 

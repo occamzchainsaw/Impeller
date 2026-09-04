@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Impeller.Plugin.Sample</RootNamespace>
+
+    <!-- Deliberately not in Impeller.slnx: it restores from a feed the main build does not fill. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Impeller.Plugins.Sdk" Version="0.1.0" />
+  </ItemGroup>
+
+</Project>

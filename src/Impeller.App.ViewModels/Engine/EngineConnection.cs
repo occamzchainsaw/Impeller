@@ -1,4 +1,4 @@
-using System.IO.Pipes;
+﻿using System.IO.Pipes;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Impeller.Core.Abstractions;
 using Impeller.Core.Abstractions.Configuration;
@@ -113,6 +113,9 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
     /// <summary>Raised on each sample of a tuning run, wherever it was started from.</summary>
     public event EventHandler<TuningProgress>? TuningProgressed;
 
+    /// <summary>A plugin appeared, went away, or had its permissions changed.</summary>
+    public event EventHandler? PluginsChanged;
+
     /// <summary>Starts connecting, and keeps reconnecting until disposed.</summary>
     public void Start() => _loop ??= Task.Run(() => RunAsync(_shutdown.Token));
 
@@ -177,6 +180,13 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
     public Task OnTuningProgressAsync(TuningProgress progress)
     {
         Dispatcher.Post(() => TuningProgressed?.Invoke(this, progress));
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public Task OnPluginsChangedAsync()
+    {
+        Dispatcher.Post(() => PluginsChanged?.Invoke(this, EventArgs.Empty));
         return Task.CompletedTask;
     }
 

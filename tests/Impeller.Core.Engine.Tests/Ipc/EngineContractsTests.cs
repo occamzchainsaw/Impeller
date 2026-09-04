@@ -1,6 +1,7 @@
-using Impeller.Core.Abstractions;
+﻿using Impeller.Core.Abstractions;
 using Impeller.Core.Abstractions.Configuration;
 using Impeller.Ipc.Contracts;
+using Impeller.Plugins.Abstractions;
 using Nerdbank.Streams;
 using StreamJsonRpc;
 
@@ -237,6 +238,43 @@ public sealed class EngineContractsTests : IAsyncDisposable
 
         Assert.Equal(progress, await _client.NextTuningProgress());
     }
+    [Fact]
+    public async Task A_plugin_summary_survives_the_trip_to_the_shell()
+    {
+        // Enums by name, arrays by value, nullable identity fields present. The identity is the
+        // half most worth checking: a grant bound to a path and a SID that arrived as nulls would
+        // look like a whole binding on the page.
+        var listed = Assert.Single(await Engine.ListPluginsAsync());
+
+        Assert.Equal(_engine.Plugin, listed);
+        Assert.Equal(PluginAdmissionState.Approved, listed.State);
+        Assert.Equal([PluginCapability.ControlFans], listed.Granted);
+        Assert.Equal(@"C:\Programs\Rig\Rig.exe", listed.ImagePath);
+    }
+
+    [Fact]
+    public async Task An_approval_arrives_with_exactly_what_the_page_ticked()
+    {
+        Assert.True(await Engine.ApprovePluginAsync(
+            "com.example.rigfan",
+            [PluginCapability.ReadSensors, PluginCapability.ControlFans],
+            [FakeEngine.FanControl, FakeEngine.HeldControl]));
+
+        var approval = Assert.NotNull(_engine.LastApproval);
+
+        Assert.Equal("com.example.rigfan", approval.Id);
+        Assert.Equal([PluginCapability.ReadSensors, PluginCapability.ControlFans], approval.Capabilities);
+        Assert.Equal([FakeEngine.FanControl, FakeEngine.HeldControl], approval.Controls);
+    }
+
+    [Fact]
+    public async Task A_change_to_the_plugins_reaches_the_shell()
+    {
+        await _engine.Events!.OnPluginsChangedAsync();
+
+        await _client.NextPluginsChanged();
+    }
+
     /// <summary>A stand-in engine holding one of everything the contracts can carry.</summary>
     private sealed class FakeEngine : IEngineControl
     {
@@ -457,6 +495,60 @@ public sealed class EngineContractsTests : IAsyncDisposable
 
         public Task<bool> CancelTuningAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(true);
+
+        /// <summary>One plugin with a bit of everything, so the round trip has something to lose.</summary>
+        public PluginSummary Plugin { get; } = new(
+            "com.example.rigfan",
+            "Rig Fan Control",
+            "2.1.0",
+            PluginAdmissionState.Approved,
+            Enabled: true,
+            Connected: true,
+            Requested: [PluginCapability.ReadSensors, PluginCapability.ControlFans],
+            Granted: [PluginCapability.ControlFans],
+            Controls: [FanControl],
+            ImagePath: @"C:\Programs\Rig\Rig.exe",
+            UserSid: "S-1-5-21-1-2-3-1001",
+            IdentityChanged: false,
+            FirstSeenAt: DateTimeOffset.UnixEpoch,
+            LastSeenAt: DateTimeOffset.UnixEpoch.AddDays(2));
+
+        /// <summary>What the last approve call carried, so the arguments can be checked too.</summary>
+        public (string Id, EquatableArray<PluginCapability> Capabilities, EquatableArray<SensorId> Controls)?
+            LastApproval { get; private set; }
+
+        public Task<EquatableArray<PluginSummary>> ListPluginsAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<EquatableArray<PluginSummary>>([Plugin]);
+
+        public Task<bool> ApprovePluginAsync(
+            string pluginId,
+            EquatableArray<PluginCapability> capabilities,
+            EquatableArray<SensorId> controls,
+            CancellationToken cancellationToken = default)
+        {
+            LastApproval = (pluginId, capabilities, controls);
+            return Task.FromResult(true);
+        }
+
+        public Task<bool> GrantPluginControlAsync(
+            string pluginId,
+            SensorId controlId,
+            CancellationToken cancellationToken = default) => Task.FromResult(true);
+
+        public Task<bool> RevokePluginControlAsync(
+            string pluginId,
+            SensorId controlId,
+            CancellationToken cancellationToken = default) => Task.FromResult(true);
+
+        public Task<bool> SetPluginEnabledAsync(
+            string pluginId,
+            bool enabled,
+            CancellationToken cancellationToken = default) => Task.FromResult(true);
+
+        public Task<bool> ForgetPluginAsync(
+            string pluginId,
+            CancellationToken cancellationToken = default) => Task.FromResult(true);
     }
 
     /// <summary>A shell that records what the engine pushed at it.</summary>
@@ -485,6 +577,17 @@ public sealed class EngineContractsTests : IAsyncDisposable
         public Task OnTuningProgressAsync(TuningProgress progress)
         {
             _tuning.TrySetResult(progress);
+            return Task.CompletedTask;
+        }
+
+        private readonly TaskCompletionSource _plugins =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task NextPluginsChanged() => _plugins.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        public Task OnPluginsChangedAsync()
+        {
+            _plugins.TrySetResult();
             return Task.CompletedTask;
         }
     }

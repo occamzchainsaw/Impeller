@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Impeller.Core.Abstractions\Impeller.Core.Abstractions.csproj" />
+    <ProjectReference Include="..\Impeller.Plugins.Abstractions\Impeller.Plugins.Abstractions.csproj" />
   </ItemGroup>
 
   <ItemGroup>

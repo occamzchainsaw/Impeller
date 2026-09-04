@@ -1,4 +1,4 @@
-using System.IO.Pipes;
+﻿using System.IO.Pipes;
 using System.Runtime.Versioning;
 using Impeller.Core.Engine;
 using Impeller.Ipc.Contracts;
@@ -28,6 +28,7 @@ namespace Impeller.EngineService.Ipc;
 [SupportedOSPlatform("windows")]
 public sealed partial class PluginRpcHost(
     PluginHost plugins,
+    PluginRegistry registry,
     EngineNotifications notifications,
     EngineReadiness readiness,
     ILogger<PluginRpcHost> logger) : BackgroundService
@@ -41,6 +42,8 @@ public sealed partial class PluginRpcHost(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         notifications.Ticked += OnTicked;
+        plugins.SessionsChanged += OnPluginsChanged;
+        registry.Changed += OnRecordChanged;
 
         try
         {
@@ -67,6 +70,8 @@ public sealed partial class PluginRpcHost(
         finally
         {
             notifications.Ticked -= OnTicked;
+            plugins.SessionsChanged -= OnPluginsChanged;
+            registry.Changed -= OnRecordChanged;
 
             await plugins.StopAsync(CancellationToken.None).ConfigureAwait(false);
             Log.Stopped(logger);
@@ -136,6 +141,13 @@ public sealed partial class PluginRpcHost(
     /// </remarks>
     private void OnTicked(object? sender, TickSnapshot snapshot) =>
         plugins.PublishTick(snapshot.Tick, snapshot.At);
+
+    // Both routes to "the Plugins page is stale" arrive as one signal, because from the window's
+    // side they are the same event: something about the plugins is no longer what it was.
+    private void OnPluginsChanged(object? sender, EventArgs e) => notifications.RaisePluginsChanged();
+
+    private void OnRecordChanged(object? sender, PluginRecord record) =>
+        notifications.RaisePluginsChanged();
 
     private static partial class Log
     {

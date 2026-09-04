@@ -1,5 +1,6 @@
-using Impeller.Core.Abstractions;
+﻿using Impeller.Core.Abstractions;
 using Impeller.Core.Abstractions.Configuration;
+using Impeller.Plugins.Abstractions;
 
 namespace Impeller.Ipc.Contracts;
 
@@ -284,6 +285,71 @@ public interface IEngineControl
     /// and the thing that decides whether a problem can be diagnosed by whoever reads it.
     /// </remarks>
     Task<DiagnosticReport> GetDiagnosticReportAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Every plugin the engine has ever seen, approved or not.</summary>
+    Task<EquatableArray<PluginSummary>> ListPluginsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Approves a plugin, granting capabilities and specific fans.
+    /// </summary>
+    /// <remarks>
+    /// The grant is bound to the program and account the plugin last connected from, so approving
+    /// one that has never connected is refused rather than granted against nothing.
+    /// </remarks>
+    /// <returns>False when there is no such plugin.</returns>
+    Task<bool> ApprovePluginAsync(
+        string pluginId,
+        EquatableArray<PluginCapability> capabilities,
+        EquatableArray<SensorId> controls,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Grants one more fan to an already-approved plugin.
+    /// </summary>
+    /// <remarks>
+    /// Refused when the engine is not driving that fan. A plugin may only hold a control that is
+    /// enabled and has a curve to fall back to, and granting one that is neither would produce a
+    /// permission that fails the moment it is used.
+    /// </remarks>
+    Task<bool> GrantPluginControlAsync(
+        string pluginId,
+        SensorId controlId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Takes one fan back. The plugin stays connected and keeps everything else.
+    /// </summary>
+    /// <remarks>
+    /// The narrowest of the three verbs and the one to reach for first. Disabling a plugin because
+    /// you wanted one fan back is how a user ends up with a plugin they have forgotten they
+    /// switched off.
+    /// </remarks>
+    Task<bool> RevokePluginControlAsync(
+        string pluginId,
+        SensorId controlId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Turns a plugin off, or back on.
+    /// </summary>
+    /// <remarks>
+    /// A disabled plugin loses its fans, has its connection closed, and is refused at the
+    /// handshake until it is enabled again. Its grants are kept, so switching it back on is not
+    /// configuring it again.
+    /// </remarks>
+    Task<bool> SetPluginEnabledAsync(
+        string pluginId,
+        bool enabled,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Drops a plugin from the record entirely, so the next connection prompts as if it were new.
+    /// </summary>
+    /// <remarks>
+    /// The destructive verb, and distinct from disabling: a forgotten plugin can come straight back
+    /// by connecting, where a disabled one cannot until the user says so.
+    /// </remarks>
+    Task<bool> ForgetPluginAsync(string pluginId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -303,6 +369,16 @@ public interface IEngineEvents
 
     /// <summary>The set of available hardware changed, so the snapshot is stale.</summary>
     Task OnHardwareChangedAsync();
+
+    /// <summary>
+    /// A plugin appeared, disappeared, or had its permissions changed.
+    /// </summary>
+    /// <remarks>
+    /// Carries nothing. The set is small, changes are rare and user-driven, and a payload would go
+    /// stale between being built and being read — so the shell is told that something moved and
+    /// asks what the truth is now.
+    /// </remarks>
+    Task OnPluginsChangedAsync();
 
     /// <summary>A tuning run said what it is doing.</summary>
     /// <remarks>

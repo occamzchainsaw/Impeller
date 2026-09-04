@@ -81,6 +81,17 @@ public sealed partial class PluginHost : IAsyncDisposable
         _plugins.Changed += OnRecordChanged;
     }
 
+    /// <summary>
+    /// Raised when a plugin connected or went away.
+    /// </summary>
+    /// <remarks>
+    /// Distinct from <c>PluginRegistry.Changed</c>, which fires when what a plugin is <em>allowed</em>
+    /// to do changes. Being connected is not stored anywhere and does not survive a restart, so
+    /// nothing else would ever announce it - and a Plugins page that showed a plugin as connected
+    /// ten minutes after it exited would be worse than one that showed nothing.
+    /// </remarks>
+    public event EventHandler? SessionsChanged;
+
     /// <summary>The tick loop. Sessions ask it what they may claim and what to write.</summary>
     internal ControlLoop Loop { get; }
 
@@ -205,6 +216,7 @@ public sealed partial class PluginHost : IAsyncDisposable
         }
 
         Log.Admitted(_logger, manifest.Id, admission.State, admission.Controls.Count);
+        SessionsChanged?.Invoke(this, EventArgs.Empty);
         return admission;
     }
 
@@ -302,6 +314,11 @@ public sealed partial class PluginHost : IAsyncDisposable
         }
 
         await session.DisposeAsync().ConfigureAwait(false);
+
+        if (known)
+        {
+            SessionsChanged?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     /// <summary>

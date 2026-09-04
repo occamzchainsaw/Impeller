@@ -1,4 +1,4 @@
-using Impeller.Core.Abstractions;
+﻿using Impeller.Core.Abstractions;
 using Impeller.Ipc.Contracts;
 
 namespace Impeller.EngineService.Ipc;
@@ -25,6 +25,9 @@ public sealed class EngineNotifications
     /// <summary>Raised on each sample of a tuning run.</summary>
     public event EventHandler<TuningProgress>? TuningProgressed;
 
+    /// <summary>Raised when a plugin connected, went away, or had its permissions changed.</summary>
+    public event EventHandler? PluginsChanged;
+
     /// <summary>
     /// Whether anything is listening for ticks.
     /// </summary>
@@ -47,4 +50,7 @@ public sealed class EngineNotifications
     /// <summary>Announces where a tuning run has got to.</summary>
     public void RaiseTuningProgress(TuningProgress progress) =>
         TuningProgressed?.Invoke(this, progress);
+
+    /// <summary>Announces that something about the plugins has changed.</summary>
+    public void RaisePluginsChanged() => PluginsChanged?.Invoke(this, EventArgs.Empty);
 }

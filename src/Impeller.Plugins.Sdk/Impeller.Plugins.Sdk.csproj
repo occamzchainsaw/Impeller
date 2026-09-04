@@ -1,0 +1,47 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    What a plugin author references, and the only Impeller assembly they ever should. It carries
+    Impeller.Plugins.Abstractions with it, which by design references nothing at all - so taking
+    this package does not put the engine, the configuration model or a hardware backend into
+    somebody else's application.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Impeller.Plugins.Sdk</PackageId>
+    <Title>Impeller plugin SDK</Title>
+    <Description>Write a program that asks the Impeller engine to drive a fan, instead of driving the hardware yourself. No driver, no elevation, no register contention.</Description>
+    <PackageTags>impeller;fan;fancontrol;hardware;plugin</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+
+    <!--
+      Versioned independently of the engine on purpose. A plugin is built once against an SDK
+      version and keeps working across engine updates; tying the two together would mean every
+      engine release invalidated every plugin's package reference for no reason.
+    -->
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="StreamJsonRpc" Version="2.25.29" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Impeller.Plugins.Abstractions\Impeller.Plugins.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Impeller.Core.Engine.Tests" />
+  </ItemGroup>
+
+</Project>

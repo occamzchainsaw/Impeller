@@ -6,20 +6,190 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:local="using:Impeller.App.Shell.Pages"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:plugins="using:Impeller.App.ViewModels.Plugins"
     mc:Ignorable="d">
 
-    <Grid Padding="24,16,24,16" RowSpacing="16">
+    <Grid Padding="24,16,24,16" RowSpacing="12">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="{x:Bind ViewModel.Title}" />
+        <Grid ColumnSpacing="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
 
-        <TextBlock
+            <StackPanel>
+                <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="{x:Bind ViewModel.Title}" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="{x:Bind local:PluginsPage.Waiting(ViewModel.WaitingCount), Mode=OneWay}" />
+            </StackPanel>
+
+            <Button
+                Grid.Column="1"
+                VerticalAlignment="Center"
+                Command="{x:Bind ViewModel.RefreshCommand}"
+                Content="Refresh" />
+        </Grid>
+
+        <InfoBar
             Grid.Row="1"
-            VerticalAlignment="Top"
-            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-            Text="Not built yet." />
+            IsClosable="True"
+            IsOpen="{x:Bind local:PluginsPage.HasText(ViewModel.Problem), Mode=OneWay}"
+            Message="{x:Bind ViewModel.Problem, Mode=OneWay}"
+            Severity="Error" />
+
+        <!--  The empty state has to explain itself: nothing here is not a failure, it is the normal case.  -->
+        <StackPanel
+            Grid.Row="2"
+            Spacing="6"
+            Visibility="{x:Bind local:PluginsPage.When(ViewModel.IsEmpty), Mode=OneWay}">
+            <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="No program has asked yet." />
+            <TextBlock
+                MaxWidth="620"
+                HorizontalAlignment="Left"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Text="A plugin is an ordinary program you chose to run. When one connects it appears here, able to do nothing at all, and waits for you to decide what it may read and which fans it may drive."
+                TextWrapping="Wrap" />
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="3">
+            <ItemsControl ItemsSource="{x:Bind ViewModel.Plugins}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="plugins:PluginCardViewModel">
+                        <Border
+                            Margin="0,0,0,12"
+                            Padding="18,14,18,14"
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8">
+
+                            <StackPanel Spacing="10">
+
+                                <!--  Who it is, and where it stands.  -->
+                                <Grid ColumnSpacing="16">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                            <TextBlock
+                                                Style="{StaticResource SubtitleTextBlockStyle}"
+                                                Text="{x:Bind DisplayName}" />
+                                            <TextBlock
+                                                VerticalAlignment="Bottom"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Text="{x:Bind Version}" />
+                                        </StackPanel>
+
+                                        <TextBlock
+                                            FontSize="12"
+                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                            IsTextSelectionEnabled="True"
+                                            Text="{x:Bind Id}" />
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Column="1" HorizontalAlignment="Right">
+                                        <TextBlock
+                                            Style="{StaticResource BodyStrongTextBlockStyle}"
+                                            Text="{x:Bind StateText}"
+                                            TextAlignment="Right" />
+                                        <TextBlock
+                                            FontSize="12"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Text="{x:Bind local:PluginsPage.ConnectedLabel(IsConnected)}"
+                                            TextAlignment="Right" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <TextBlock
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Text="{x:Bind GrantsText}"
+                                    TextWrapping="Wrap" />
+
+                                <!--
+                                    The program and account it ran from. This is the whole reason a
+                                    grant is not just a string match, so it is shown rather than
+                                    hidden behind a details expander nobody opens.
+                                -->
+                                <TextBlock
+                                    FontFamily="Consolas"
+                                    FontSize="12"
+                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                    IsTextSelectionEnabled="True"
+                                    Text="{x:Bind ProgramText}"
+                                    TextWrapping="Wrap" />
+
+                                <InfoBar
+                                    IsClosable="False"
+                                    IsOpen="{x:Bind WantsHardwareProvision}"
+                                    Message="This plugin also offers hardware of its own. Impeller speaks that part of the contract but does not implement it yet, so there is nothing here to grant and nothing is wrong."
+                                    Severity="Informational" />
+
+                                <!--  What it may read. All or nothing, because per-sensor consent is a dialog nobody would read.  -->
+                                <CheckBox
+                                    Content="May read this machine's sensors"
+                                    IsChecked="{x:Bind GrantReadSensors, Mode=TwoWay}"
+                                    Visibility="{x:Bind local:PluginsPage.When(WantsReadSensors)}" />
+
+                                <!--  Which fans it may drive. Per fan, which is the whole point of the grant list.  -->
+                                <Expander
+                                    HorizontalAlignment="Stretch"
+                                    HorizontalContentAlignment="Stretch"
+                                    Header="Fans it may drive">
+                                    <ItemsControl ItemsSource="{x:Bind Fans}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="plugins:GrantedFanViewModel">
+                                                <CheckBox
+                                                    Content="{x:Bind Name}"
+                                                    IsChecked="{x:Bind Granted, Mode=TwoWay}"
+                                                    IsEnabled="{x:Bind Claimable}"
+                                                    ToolTipService.ToolTip="{x:Bind local:PluginsPage.FanTooltip(Obstacle)}" />
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </Expander>
+
+                                <!--
+                                    Three buttons, three genuinely different outcomes. Forget is last
+                                    and unstyled; approving is the one thing anyone came here to do.
+                                -->
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button
+                                        Command="{x:Bind ApproveCommand}"
+                                        Content="Apply"
+                                        IsEnabled="{x:Bind local:PluginsPage.HasText(Id)}"
+                                        Style="{StaticResource AccentButtonStyle}"
+                                        ToolTipService.ToolTip="Grant exactly what is ticked above, and nothing else." />
+
+                                    <Button
+                                        Command="{x:Bind ToggleEnabledCommand}"
+                                        Content="{x:Bind local:PluginsPage.EnableLabel(IsEnabled)}"
+                                        ToolTipService.ToolTip="Stop it connecting at all. Its permissions are kept, so switching it back on is one click." />
+
+                                    <Button
+                                        Command="{x:Bind ForgetCommand}"
+                                        Content="Forget"
+                                        ToolTipService.ToolTip="Erase it. The next time it connects you will be asked about it as if it were new." />
+
+                                    <ProgressRing
+                                        Width="18"
+                                        Height="18"
+                                        IsActive="{x:Bind IsBusy, Mode=OneWay}" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
     </Grid>
 </Page>
