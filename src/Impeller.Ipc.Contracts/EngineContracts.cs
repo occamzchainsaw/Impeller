@@ -33,7 +33,11 @@ public sealed record EngineStatus(
 
 /// <summary>A sensor as the shell needs to show it.</summary>
 /// <param name="Id">Stable identity, and the only thing a configuration stores.</param>
-/// <param name="Name">Provider-supplied name. Not unique, not identity.</param>
+/// <param name="Name">Provider-supplied name, on its own. Not unique, not identity.</param>
+/// <param name="HardwareName">
+/// What it belongs to, for example <c>Nuvoton NCT6687D</c>. Kept separate from the name so a
+/// surface that already says which hardware it is showing does not print it twice.
+/// </param>
 /// <param name="Kind">What it measures.</param>
 /// <param name="ProviderId">Which backend produced it.</param>
 /// <param name="HardwarePath">
@@ -44,6 +48,7 @@ public sealed record EngineStatus(
 public sealed record SensorDescriptor(
     SensorId Id,
     string Name,
+    string HardwareName,
     SensorKind Kind,
     string ProviderId,
     string HardwarePath,
@@ -51,7 +56,8 @@ public sealed record SensorDescriptor(
 
 /// <summary>A writable control, with whatever is currently driving it.</summary>
 /// <param name="Id">Stable identity.</param>
-/// <param name="Name">Provider-supplied name.</param>
+/// <param name="Name">Provider-supplied name, on its own.</param>
+/// <param name="HardwareName">What it belongs to, kept separate from the name.</param>
 /// <param name="ProviderId">Which backend produced it.</param>
 /// <param name="HardwarePath">Diagnostic rendering of the fingerprint.</param>
 /// <param name="CommandedDuty">The duty last written, or null if the engine has not written it.</param>
@@ -71,6 +77,7 @@ public sealed record SensorDescriptor(
 public sealed record ControlDescriptor(
     SensorId Id,
     string Name,
+    string HardwareName,
     string ProviderId,
     string HardwarePath,
     Duty? CommandedDuty,

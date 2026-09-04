@@ -74,6 +74,10 @@ public enum ControlHolder
 /// <summary>A sensor as a plugin sees it.</summary>
 /// <param name="Id">Its stable reference, and the only thing worth saving.</param>
 /// <param name="Name">What the hardware calls it. Not unique, not identity, free to change.</param>
+/// <param name="HardwareName">
+/// What it belongs to, for example <c>Nuvoton NCT6687D</c>, or empty when unknown. Separate from
+/// the name so a plugin can show either, or both, without having to take a string apart.
+/// </param>
 /// <param name="Kind">What it measures.</param>
 /// <param name="Provider">Which backend produced it.</param>
 /// <param name="HardwarePath">
@@ -84,6 +88,7 @@ public enum ControlHolder
 public sealed record SensorInfo(
     SensorRef Id,
     string Name,
+    string HardwareName,
     PluginSensorKind Kind,
     string Provider,
     string HardwarePath,
@@ -92,6 +97,7 @@ public sealed record SensorInfo(
 /// <summary>A fan control as a plugin sees it.</summary>
 /// <param name="Id">Its stable reference.</param>
 /// <param name="Name">What the hardware calls it.</param>
+/// <param name="HardwareName">What it belongs to, or empty when unknown.</param>
 /// <param name="Provider">Which backend produced it.</param>
 /// <param name="HardwarePath">Diagnostic text. Not identity.</param>
 /// <param name="Tachometer">
@@ -127,6 +133,7 @@ public sealed record SensorInfo(
 public sealed record ControlInfo(
     SensorRef Id,
     string Name,
+    string HardwareName,
     string Provider,
     string HardwarePath,
     SensorRef Tachometer,

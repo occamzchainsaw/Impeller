@@ -1,4 +1,4 @@
-using Impeller.Core.Abstractions;
+﻿using Impeller.Core.Abstractions;
 using Impeller.Plugins.Abstractions;
 
 namespace Impeller.Plugins.Host;
@@ -118,6 +118,7 @@ public static class PluginTranslation
         return new SensorInfo(
             ToRef(sensor.Id),
             sensor.Name,
+            sensor.HardwareName,
             ToPluginKind(sensor.Kind),
             sensor.Fingerprint.ProviderId,
             sensor.Fingerprint.ToString(),

@@ -486,6 +486,7 @@ public sealed class EngineRpcService(
     private static SensorDescriptor Describe(ISensor sensor) => new(
         sensor.Id,
         sensor.Name,
+        sensor.HardwareName,
         sensor.Kind,
         sensor.Fingerprint.ProviderId,
         sensor.Fingerprint.ToString(),
@@ -498,6 +499,7 @@ public sealed class EngineRpcService(
         return new ControlDescriptor(
             control.Id,
             control.Name,
+            control.HardwareName,
             control.Fingerprint.ProviderId,
             control.Fingerprint.ToString(),
             loop.GetCommandedDuty(control.Id) ?? control.CommandedDuty,

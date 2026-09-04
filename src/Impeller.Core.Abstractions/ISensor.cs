@@ -1,4 +1,4 @@
-namespace Impeller.Core.Abstractions;
+﻿namespace Impeller.Core.Abstractions;
 
 /// <summary>
 /// A single readable measurement, refreshed by its owning <see cref="ISensorProvider"/>.
@@ -9,7 +9,25 @@ public interface ISensor
     SensorId Id { get; }
 
     /// <summary>Provider-supplied name, for example <c>CPU Package</c>. Not unique, not identity.</summary>
+    /// <remarks>
+    /// The sensor's own name and nothing else. A provider must not qualify it with its hardware -
+    /// that is what <see cref="HardwareName"/> is for. Gluing the two together forces the
+    /// combination on every surface downstream, including the ones that already say which piece of
+    /// hardware they are showing, and no consumer can take it apart again without guessing at a
+    /// separator.
+    /// </remarks>
     string Name { get; }
+
+    /// <summary>
+    /// The hardware this sensor belongs to, for example <c>Nuvoton NCT6687D</c>, or empty when the
+    /// provider cannot say.
+    /// </summary>
+    /// <remarks>
+    /// A default implementation rather than a required member, so a provider that has nothing
+    /// useful to add - and every existing test double - is unaffected. Names are not unique within
+    /// a machine and this is what disambiguates them: four sensors called "Fan #2" are ordinary.
+    /// </remarks>
+    string HardwareName => string.Empty;
 
     /// <summary>What this sensor measures.</summary>
     SensorKind Kind { get; }

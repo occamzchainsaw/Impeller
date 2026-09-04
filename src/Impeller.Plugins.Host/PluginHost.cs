@@ -472,6 +472,7 @@ public sealed partial class PluginHost : IAsyncDisposable
         return new ControlInfo(
             reference,
             control.Name,
+            control.HardwareName,
             control.Fingerprint.ProviderId,
             control.Fingerprint.ToString(),
             PluginTranslation.ToRef(Loop.GetPairedFanSensor(control.Id)),

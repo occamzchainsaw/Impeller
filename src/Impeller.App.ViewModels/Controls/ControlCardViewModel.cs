@@ -23,10 +23,14 @@ namespace Impeller.App.ViewModels.Controls;
 /// exists to make impossible.
 /// </para>
 /// </remarks>
-public sealed partial class ControlCardViewModel : ObservableObject
+public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDisposable
 {
+    /// <summary>The shortest gap between two duty writes while the slider is moving.</summary>
+    private static readonly TimeSpan WriteInterval = TimeSpan.FromMilliseconds(250);
+
     private readonly EngineConnection _connection;
     private readonly Func<ControlBindingDefinition, Task> _save;
+    private readonly ThrottledWriter<Duty> _writer;
 
     private ControlBindingDefinition _binding;
 
@@ -52,8 +56,11 @@ public sealed partial class ControlCardViewModel : ObservableObject
         _save = save;
         _binding = binding;
 
+        _writer = new ThrottledWriter<Duty>(TimeProvider.System, WriteInterval, SendDutyAsync);
+
         Id = descriptor.Id;
         Name = descriptor.Name;
+        HardwareName = descriptor.HardwareName;
         HardwarePath = descriptor.HardwarePath;
         CurveName = curveName;
         IsDriven = binding.Enabled;
@@ -68,8 +75,15 @@ public sealed partial class ControlCardViewModel : ObservableObject
     /// <summary>Which control this is.</summary>
     public SensorId Id { get; }
 
-    /// <summary>What the hardware calls it.</summary>
+    /// <summary>What the hardware calls it, on its own.</summary>
     public string Name { get; }
+
+    /// <summary>What it belongs to, for a tooltip rather than for the card's face.</summary>
+    /// <remarks>
+    /// A card under a heading that already names the fan does not also need to say which chip it
+    /// hangs off. It matters when two fans share a name, which is why it is still carried.
+    /// </remarks>
+    public string HardwareName { get; }
 
     /// <summary>Where it lives, for when two fans share a name.</summary>
     public string HardwarePath { get; }
@@ -117,6 +131,9 @@ public sealed partial class ControlCardViewModel : ObservableObject
     [ObservableProperty]
     public partial bool IsBusy { get; private set; }
 
+    /// <summary>Set while the card is moving its own slider, so that does not read as a user edit.</summary>
+    private bool _suppressWrite;
+
     /// <summary>The last thing that went wrong, or null.</summary>
     [ObservableProperty]
     public partial string? Problem { get; private set; }
@@ -161,6 +178,16 @@ public sealed partial class ControlCardViewModel : ObservableObject
         SpeedText = rpm is { } speed ? $"{speed:0} RPM" : "—";
 
         IsPinned = reading.Owner == ControlOwnerKind.ManualOverride;
+
+        // Follows the fan while somebody else is driving it, so taking it by hand starts from where
+        // it already is rather than jolting it to wherever the slider happened to be left. Left
+        // alone once pinned: from that point the slider is the instruction, not a readout.
+        if (!IsPinned && reading.CommandedDuty is { } commanded)
+        {
+            _suppressWrite = true;
+            PinDuty = commanded.Percent;
+            _suppressWrite = false;
+        }
         IsHeldElsewhere = reading.Owner is ControlOwnerKind.Plugin or ControlOwnerKind.Failsafe;
 
         OwnerText = reading.Owner switch
@@ -237,13 +264,24 @@ public sealed partial class ControlCardViewModel : ObservableObject
     /// </remarks>
     partial void OnPinDutyChanged(float value)
     {
-        if (!IsPinned || _connection.Engine is not { } engine)
+        if (_suppressWrite || !IsPinned)
         {
             return;
         }
 
-        _ = engine.SetManualDutyAsync(Id, new Duty(value));
+        _writer.Write(new Duty(value));
     }
+
+    private async Task SendDutyAsync(Duty duty, CancellationToken cancellationToken)
+    {
+        if (_connection.Engine is { } engine)
+        {
+            await engine.SetManualDutyAsync(Id, duty, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask DisposeAsync() => _writer.DisposeAsync();
 
     private async Task SendAsync(Func<IEngineControl, Task> send)
     {

@@ -342,11 +342,12 @@ public sealed class EngineContractsTests : IAsyncDisposable
             new EngineStatus("0.1.0", 1234, DateTimeOffset.UnixEpoch, false, @"C:\ProgramData\Impeller"),
             [
                 new SensorDescriptor(
-                    CpuSensor, "CPU Package", SensorKind.Temperature, "lhm", "lhm/amdcpu/0/temperature/2", 61.5f),
+                    CpuSensor, "CPU Package", "AMD Ryzen 7 9800X3D", SensorKind.Temperature,
+                    "lhm", "lhm/amdcpu/0/temperature/2", 61.5f),
             ],
             [
                 new ControlDescriptor(
-                    FanControl, "Fan #4", "lhm", "lhm/lpc/nct6687d/0/control/4",
+                    FanControl, "Fan #4", "Nuvoton NCT6687D", "lhm", "lhm/lpc/nct6687d/0/control/4",
                     new Duty(55f), false, ControlOwnerKind.Curve, null, Claimable: true),
             ],
             "Default",

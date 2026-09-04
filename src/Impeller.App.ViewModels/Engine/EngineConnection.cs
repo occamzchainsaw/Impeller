@@ -239,12 +239,15 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
 
             if (wasConnected)
             {
-                // Connected and then dropped: try again promptly, since a service restart is the
-                // most likely cause and it will be back in a second or two.
+                // Connected and then dropped: back to the shortest delay, since a service restart
+                // is the likeliest cause and it will be back in a second or two.
                 delay = MinimumRetryDelay;
-                continue;
             }
 
+            // Always waited, never skipped. A connection accepted and then closed at once - which
+            // is exactly what an engine shutting down does - would otherwise send this loop
+            // straight back round with no pause, opening connections as fast as the machine
+            // allows. The plugin SDK had the identical defect and it crashed its own test host.
             try
             {
                 await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
@@ -252,6 +255,11 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
             catch (OperationCanceledException)
             {
                 return;
+            }
+
+            if (wasConnected)
+            {
+                continue;
             }
 
             // Back off toward a quiet poll. An engine that is not installed should not cost a

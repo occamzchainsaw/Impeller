@@ -1,4 +1,4 @@
-using Impeller.App.ViewModels.Sensors;
+﻿using Impeller.App.ViewModels.Sensors;
 using Impeller.Core.Abstractions;
 using Impeller.Ipc.Contracts;
 
@@ -20,7 +20,7 @@ public class SensorTreeTests
         SensorKind kind,
         string path,
         float? value = 40f) =>
-        new(SensorId.New(), $"{hardware} — {name}", kind, "lhm", path, value);
+        new(SensorId.New(), name, hardware, kind, "lhm", path, value);
 
     private static List<SensorDescriptor> Machine() =>
     [

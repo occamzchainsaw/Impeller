@@ -1,4 +1,4 @@
-using Impeller.Core.Abstractions;
+﻿using Impeller.Core.Abstractions;
 using LhmHw = LibreHardwareMonitor.Hardware;
 
 namespace Impeller.Hardware.Lhm;
@@ -20,7 +20,10 @@ internal class LhmSensor(SensorId id, LhmHw.ISensor sensor, HardwareFingerprint 
     public SensorId Id { get; } = id;
 
     /// <inheritdoc />
-    public string Name { get; } = BuildName(sensor);
+    public string Name { get; } = sensor.Name;
+
+    /// <inheritdoc />
+    public string HardwareName { get; } = sensor.Hardware?.Name ?? string.Empty;
 
     /// <inheritdoc />
     public SensorKind Kind { get; } = LhmMapping.ToSensorKind(sensor.SensorType);
@@ -30,16 +33,6 @@ internal class LhmSensor(SensorId id, LhmHw.ISensor sensor, HardwareFingerprint 
 
     /// <inheritdoc />
     public float? Value => Sensor.Value;
-
-    /// <summary>
-    /// Qualifies the sensor's own name with its hardware, because LibreHardwareMonitor names are
-    /// only unique within a device — a machine can easily present four sensors called "Fan #2".
-    /// </summary>
-    private static string BuildName(LhmHw.ISensor sensor)
-    {
-        var hardware = sensor.Hardware?.Name;
-        return string.IsNullOrWhiteSpace(hardware) ? sensor.Name : $"{hardware} — {sensor.Name}";
-    }
 
     public override string ToString() => $"{Name} ({Fingerprint})";
 }

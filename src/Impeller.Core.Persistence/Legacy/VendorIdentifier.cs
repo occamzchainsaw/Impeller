@@ -1,4 +1,4 @@
-using Impeller.Core.Abstractions;
+﻿using Impeller.Core.Abstractions;
 
 namespace Impeller.Core.Persistence.Legacy;
 
@@ -145,7 +145,7 @@ public static class VendorIdentifier
         var candidates = (reference.Role == VendorRole.Control
                 ? registry.Controls.Cast<ISensor>()
                 : registry.Sensors.Where(sensor => sensor.Kind == ExpectedKind(reference.Role)))
-            .Where(sensor => Normalize(sensor.Name).Contains(device, StringComparison.Ordinal))
+            .Where(sensor => Qualified(sensor).Contains(device, StringComparison.Ordinal))
             .ToList();
 
         if (candidates.Count == 0)
@@ -165,7 +165,7 @@ public static class VendorIdentifier
             }
 
             candidates = candidates
-                .Where(sensor => Normalize(sensor.Name).Contains(wanted, StringComparison.Ordinal))
+                .Where(sensor => Qualified(sensor).Contains(wanted, StringComparison.Ordinal))
                 .ToList();
 
             if (candidates.Count == 0)
@@ -212,4 +212,17 @@ public static class VendorIdentifier
     /// </remarks>
     private static string Normalize(string value) =>
         string.Concat(value.Where(char.IsLetterOrDigit)).ToLowerInvariant();
+
+    /// <summary>
+    /// A sensor's hardware and its own name, normalised together.
+    /// </summary>
+    /// <remarks>
+    /// A legacy reference names a device - "nvidiagpu", "nct6687d" - and then a sensor on it, so
+    /// the match has to see both. This used to work by accident, because the provider glued the
+    /// hardware onto the front of every sensor name; now that the two are separate the join has to
+    /// be made deliberately, here, rather than being reintroduced in the provider where it would
+    /// reach every surface in both applications.
+    /// </remarks>
+    private static string Qualified(ISensor sensor) =>
+        Normalize(sensor.HardwareName) + Normalize(sensor.Name);
 }

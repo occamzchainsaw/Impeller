@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Impeller.Core.Abstractions;
 using Impeller.Ipc.Contracts;
@@ -11,18 +11,17 @@ public sealed partial class SensorItemViewModel(SensorDescriptor descriptor) : O
     /// <summary>Stable identity, and the only thing a configuration ever stores.</summary>
     public SensorId Id { get; } = descriptor.Id;
 
-    /// <summary>
-    /// What to show, with the hardware's name taken off the front.
-    /// </summary>
+    /// <summary>What to show: the sensor's own name, nothing else.</summary>
     /// <remarks>
-    /// The provider gives every sensor its hardware's name as a prefix, which is right for a flat
-    /// list and wrong under a heading that already says it. "Nuvoton NCT6687D — CPU Fan" under a
-    /// "Nuvoton NCT6687D" heading is a row that reads its own address out twice.
+    /// Under a heading that already names the hardware, a row that repeats it reads its own address
+    /// out twice. The provider now supplies the two separately, so there is nothing to strip.
     /// </remarks>
-    public string Name { get; } = SensorNaming.WithoutHardware(descriptor.Name);
+    public string Name { get; } = descriptor.Name;
 
-    /// <summary>The full name, for a tooltip and for searching.</summary>
-    public string FullName { get; } = descriptor.Name;
+    /// <summary>Its hardware and its name together, for a tooltip and for a flat list.</summary>
+    public string FullName { get; } = string.IsNullOrWhiteSpace(descriptor.HardwareName)
+        ? descriptor.Name
+        : $"{descriptor.HardwareName} — {descriptor.Name}";
 
     /// <summary>What it measures.</summary>
     public SensorKind Kind { get; } = descriptor.Kind;
@@ -206,18 +205,18 @@ public sealed partial class SensorTreeViewModel : ObservableObject
             return false;
         }
 
+        // The hardware name is searched too, so typing "nuvoton" still finds the motherboard's
+        // sensors now that it is no longer glued onto the front of every one of their names.
         return string.IsNullOrWhiteSpace(Search)
             || sensor.Name.Contains(Search, StringComparison.OrdinalIgnoreCase)
+            || sensor.HardwareName.Contains(Search, StringComparison.OrdinalIgnoreCase)
             || sensor.HardwarePath.Contains(Search, StringComparison.OrdinalIgnoreCase);
     }
 }
 
-/// <summary>Turns provider-supplied names and paths into something to group and label by.</summary>
+/// <summary>Turns provider-supplied paths into something to group by.</summary>
 internal static class SensorNaming
 {
-    /// <summary>What the provider puts between a hardware name and a sensor name.</summary>
-    private const string Separator = " — ";
-
     /// <summary>
     /// The hardware part of a sensor's path.
     /// </summary>
@@ -240,32 +239,24 @@ internal static class SensorNaming
     }
 
     /// <summary>
-    /// What to head a group with: the hardware name the members agree on, or the path.
+    /// What to head a group with: the hardware name its members carry, or the path.
     /// </summary>
     /// <remarks>
-    /// Taken from the members rather than from the path because the path is an identifier and reads
-    /// like one. A user looking for their motherboard's fan headers is looking for "Nuvoton
-    /// NCT6687D", not "lhm/lpc/nct6687d/0".
+    /// Read from the descriptor rather than sliced off the front of a name. A user looking for
+    /// their motherboard's fan headers is looking for "Nuvoton NCT6687D", not
+    /// "lhm/lpc/nct6687d/0" - and the provider now says which it is instead of leaving the shell
+    /// to find a separator.
     /// </remarks>
     public static string HardwareName(IEnumerable<SensorDescriptor> group)
     {
         foreach (var sensor in group)
         {
-            var separator = sensor.Name.IndexOf(Separator, StringComparison.Ordinal);
-
-            if (separator > 0)
+            if (!string.IsNullOrWhiteSpace(sensor.HardwareName))
             {
-                return sensor.Name[..separator];
+                return sensor.HardwareName;
             }
         }
 
         return group.Select(HardwareKey).FirstOrDefault() ?? "Hardware";
-    }
-
-    /// <summary>A sensor's own name, with its hardware's name taken off the front.</summary>
-    public static string WithoutHardware(string name)
-    {
-        var separator = name.IndexOf(Separator, StringComparison.Ordinal);
-        return separator > 0 ? name[(separator + Separator.Length)..] : name;
     }
 }

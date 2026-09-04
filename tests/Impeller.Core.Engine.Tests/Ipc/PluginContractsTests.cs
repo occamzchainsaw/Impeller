@@ -482,10 +482,10 @@ public sealed class PluginContractsTests : IAsyncDisposable
                 false,
                 [
                     new SensorInfo(
-                        CpuSensor, "CPU Package", PluginSensorKind.Temperature,
+                        CpuSensor, "CPU Package", "AMD Ryzen 7 9800X3D", PluginSensorKind.Temperature,
                         "lhm", "lhm/amdcpu/0/temperature/2", 61.5f),
                     new SensorInfo(
-                        QuietSensor, "Fan #7", PluginSensorKind.FanSpeed,
+                        QuietSensor, "Fan #7", "Nuvoton NCT6687D", PluginSensorKind.FanSpeed,
                         "lhm", "lhm/lpc/nct6687d/0/fan/7", null),
                 ],
                 [
@@ -493,10 +493,12 @@ public sealed class PluginContractsTests : IAsyncDisposable
                     // value a plugin cannot work out for itself and an absent one has to be
                     // distinguishable from a present one.
                     new ControlInfo(
-                        GrantedFan, "Fan #4", "lhm", "lhm/lpc/nct6687d/0/control/4",
+                        GrantedFan, "Fan #4", "Nuvoton NCT6687D", "lhm",
+                        "lhm/lpc/nct6687d/0/control/4",
                         QuietSensor, 30f, 45f, ControlHolder.Curve, null, true, true),
                     new ControlInfo(
-                        UndrivenFan, "Fan #5", "lhm", "lhm/lpc/nct6687d/0/control/5",
+                        UndrivenFan, "Fan #5", "Nuvoton NCT6687D", "lhm",
+                        "lhm/lpc/nct6687d/0/control/5",
                         SensorRef.None, null, null, ControlHolder.Curve, null, true, false),
                 ]));
         }
