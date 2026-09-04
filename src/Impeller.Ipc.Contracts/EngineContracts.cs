@@ -135,6 +135,21 @@ public readonly record struct ControlReading(
     ControlOwnerKind Owner,
     string? ClaimantId);
 
+/// <summary>One curve's output this tick.</summary>
+/// <param name="Id">Which curve.</param>
+/// <param name="Output">
+/// What it is asking for, or null when it could not produce a value — its sensor is not reporting,
+/// or a curve it depends on could not answer either.
+/// </param>
+/// <remarks>
+/// The engine has computed this every tick since Phase 0 and threw it away after resolving the
+/// controls. It is carried now because a curve editor that cannot show what the curve is doing
+/// right now is a form, and one that can is something you can watch respond — which is the only
+/// way to tell a badly shaped curve from a well shaped one without waiting for the machine to get
+/// hot.
+/// </remarks>
+public readonly record struct CurveReading(CurveId Id, Duty? Output);
+
 /// <summary>
 /// What changed on one tick.
 /// </summary>
@@ -147,11 +162,16 @@ public readonly record struct ControlReading(
 /// <param name="At">When the tick completed.</param>
 /// <param name="Sensors">Every sensor's current value.</param>
 /// <param name="Controls">Every control's current state.</param>
+/// <param name="Curves">
+/// Every curve's output. Defaulted rather than required, so a client built against the older shape
+/// keeps deserialising — the additive-versioning habit the plugin protocol was designed around.
+/// </param>
 public sealed record TickSnapshot(
     long Tick,
     DateTimeOffset At,
     EquatableArray<SensorReading> Sensors,
-    EquatableArray<ControlReading> Controls);
+    EquatableArray<ControlReading> Controls,
+    EquatableArray<CurveReading> Curves = default);
 
 /// <summary>The outcome of trying to apply or load a configuration.</summary>
 /// <param name="Applied">Whether it is now driving the engine.</param>

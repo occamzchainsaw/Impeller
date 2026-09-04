@@ -144,13 +144,44 @@ public sealed class EngineContractsTests : IAsyncDisposable
             42,
             DateTimeOffset.UnixEpoch,
             [new SensorReading(FakeEngine.CpuSensor, 61.5f)],
-            [new ControlReading(FakeEngine.FanControl, new Duty(55f), ControlOwnerKind.Plugin, "com.example.rigfan")]);
+            [new ControlReading(FakeEngine.FanControl, new Duty(55f), ControlOwnerKind.Plugin, "com.example.rigfan")],
+            [new CurveReading(CurveId.New(), new Duty(72f))]);
 
         await _engine.Events!.OnTickAsync(tick);
 
         var received = await _client.NextTick();
 
         Assert.Equal(tick, received);
+    }
+
+    [Fact]
+    public async Task A_curve_that_cannot_answer_arrives_as_no_output_rather_than_zero()
+    {
+        // Same reasoning as a sensor that is not reporting: the editor's read-out has to be able to
+        // say "no output", and a null read back as 0 would show a curve asking for a stopped fan.
+        var curve = CurveId.New();
+
+        await _engine.Events!.OnTickAsync(new TickSnapshot(
+            1,
+            DateTimeOffset.UnixEpoch,
+            [],
+            [],
+            [new CurveReading(curve, null)]));
+
+        var received = await _client.NextTick();
+
+        Assert.Equal(curve, received.Curves[0].Id);
+        Assert.Null(received.Curves[0].Output);
+    }
+
+    [Fact]
+    public async Task A_tick_sent_without_curve_outputs_still_arrives()
+    {
+        // The field was added after the shape had shipped, and the whole point of defaulting it is
+        // that neither end has to be rebuilt at the same moment as the other.
+        await _engine.Events!.OnTickAsync(new TickSnapshot(1, DateTimeOffset.UnixEpoch, [], []));
+
+        Assert.Empty((await _client.NextTick()).Curves);
     }
 
     [Fact]

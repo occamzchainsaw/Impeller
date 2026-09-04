@@ -4,6 +4,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="using:Impeller.App.Shell.Controls"
+    xmlns:curves="using:Impeller.App.ViewModels.Curves"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:local="using:Impeller.App.Shell.Pages"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -63,8 +64,16 @@
             </DropDownButton>
         </Grid>
 
+        <!--
+            Capped and left-aligned. A form stretched across a 4K monitor puts a field's label at
+            one end of the desk and its box at the other, and none of these panels has anything
+            useful to do with the extra width.
+        -->
         <ScrollViewer Grid.Column="1">
-            <StackPanel Spacing="14">
+            <StackPanel
+                MaxWidth="720"
+                HorizontalAlignment="Left"
+                Spacing="14">
 
                 <TextBlock
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -73,6 +82,7 @@
 
                 <StackPanel Spacing="14" Visibility="{x:Bind local:CurvesPage.WhenNotNull(ViewModel.Editor), Mode=OneWay}">
 
+                    <!--  Name, and the three things you can do to the whole curve.  -->
                     <Grid ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
@@ -82,9 +92,8 @@
                         </Grid.ColumnDefinitions>
 
                         <TextBox
-                            x:Name="NameBox"
                             Header="Name"
-                            TextChanged="OnEdited" />
+                            Text="{x:Bind ViewModel.Editor.Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <Button
                             Grid.Column="1"
@@ -104,29 +113,150 @@
                             Content="Delete" />
                     </Grid>
 
-                    <!--  The canvas, for a graph curve. Everything else is numbers.  -->
+                    <!--
+                        What it is, what it is asking for right now, and whether it has been saved.
+                        The live output is the difference between a form and something you can watch
+                        respond: it is the only way to tell a badly shaped curve from a well shaped
+                        one without waiting for the machine to get hot.
+                    -->
                     <Border
-                        Padding="4"
-                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        Padding="12,8,12,8"
+                        Background="{ThemeResource LayerFillColorDefaultBrush}"
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                         BorderThickness="1"
-                        CornerRadius="8"
-                        Visibility="{x:Bind local:CurvesPage.WhenGraph(ViewModel.Editor), Mode=OneWay}">
-                        <StackPanel>
-                            <controls:CurveCanvas x:Name="Canvas" Height="260" />
+                        CornerRadius="6">
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
                             <TextBlock
-                                Margin="8,0,8,6"
-                                FontSize="12"
+                                VerticalAlignment="Center"
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                Text="Click to add a point, drag to move it, right-click to remove it." />
-                        </StackPanel>
+                                Text="{x:Bind local:CurvesPage.KindLabel(ViewModel.Editor), Mode=OneWay}" />
+
+                            <TextBlock
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="Unsaved changes"
+                                Visibility="{x:Bind local:CurvesPage.When(ViewModel.IsDirty), Mode=OneWay}" />
+
+                            <StackPanel
+                                Grid.Column="2"
+                                Orientation="Horizontal"
+                                Spacing="8">
+                                <TextBlock
+                                    VerticalAlignment="Center"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Text="Asking for" />
+                                <TextBlock
+                                    VerticalAlignment="Center"
+                                    Style="{StaticResource BodyStrongTextBlockStyle}"
+                                    Text="{x:Bind ViewModel.Editor.OutputText, Mode=OneWay}" />
+                            </StackPanel>
+                        </Grid>
                     </Border>
 
-                    <!--  Shared numbers. Which of them mean anything depends on the kind, and the headers say which.  -->
+                    <!--
+                        Reads. The summary is the header, so the picker is folded away by default:
+                        a hundred and ninety-three radio buttons with no statement of which one was
+                        chosen made the most important fact on the panel the hardest to find.
+                    -->
+                    <Expander
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch"
+                        Visibility="{x:Bind local:CurvesPage.When(ViewModel.Editor.ReadsASensor), Mode=OneWay}">
+                        <Expander.Header>
+                            <StackPanel
+                                Orientation="Horizontal"
+                                Spacing="8"
+                                ToolTipService.ToolTip="Change which sensor this curve reads.">
+                                <TextBlock VerticalAlignment="Center" Text="Reads" />
+                                <TextBlock
+                                    VerticalAlignment="Center"
+                                    Style="{StaticResource BodyStrongTextBlockStyle}"
+                                    Text="{x:Bind ViewModel.ReadsText, Mode=OneWay}" />
+                            </StackPanel>
+                        </Expander.Header>
+
+                        <StackPanel Spacing="8">
+                            <AutoSuggestBox
+                                PlaceholderText="Search sensors"
+                                QueryIcon="Find"
+                                Text="{x:Bind ViewModel.SensorPicker.Search, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                            <!--
+                                Expanders rather than a TreeView: the shape is exactly two levels
+                                deep and never grows a third, and a TreeView costs a node graph
+                                built in code to express that.
+                            -->
+                            <ScrollViewer MaxHeight="320">
+                                <ItemsControl ItemsSource="{x:Bind ViewModel.SensorPicker.Groups}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="sensors:SensorGroupViewModel">
+                                            <Expander
+                                                Margin="0,0,0,4"
+                                                HorizontalAlignment="Stretch"
+                                                HorizontalContentAlignment="Stretch"
+                                                Header="{x:Bind Name}">
+                                                <ItemsControl ItemsSource="{x:Bind Sensors}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate x:DataType="sensors:SensorItemViewModel">
+                                                            <RadioButton
+                                                                Checked="OnSensorChosen"
+                                                                Content="{x:Bind local:CurvesPage.DescribeSensor(Name, ValueText), Mode=OneWay}"
+                                                                GroupName="CurveSource"
+                                                                IsChecked="{x:Bind IsSelected, Mode=OneWay}" />
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </Expander>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </StackPanel>
+                    </Expander>
+
+                    <!--  Flat: a constant. One value, said twice so it can be dragged or typed.  -->
+                    <StackPanel Spacing="8" Visibility="{x:Bind local:CurvesPage.When(ViewModel.Editor.IsFlat), Mode=OneWay}">
+                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Always run at" />
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <Slider
+                                VerticalAlignment="Center"
+                                Maximum="100"
+                                Minimum="0"
+                                StepFrequency="1"
+                                Value="{x:Bind ViewModel.Editor.MinimumDuty, Mode=TwoWay}" />
+
+                            <NumberBox
+                                Grid.Column="1"
+                                MinWidth="120"
+                                Maximum="100"
+                                Minimum="0"
+                                SpinButtonPlacementMode="Compact"
+                                Value="{x:Bind ViewModel.Editor.MinimumDuty, Mode=TwoWay}" />
+                        </Grid>
+                        <TextBlock
+                            FontSize="12"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="A flat curve is a constant. It reads nothing and never changes."
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <!--  Linear: a straight ramp between two readings.  -->
                     <Grid
                         ColumnSpacing="12"
                         RowSpacing="12"
-                        Visibility="{x:Bind local:CurvesPage.WhenNotGraph(ViewModel.Editor), Mode=OneWay}">
+                        Visibility="{x:Bind local:CurvesPage.When(ViewModel.Editor.IsLinear), Mode=OneWay}">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="*" />
@@ -137,74 +267,303 @@
                         </Grid.RowDefinitions>
 
                         <NumberBox
-                            x:Name="LowInputBox"
-                            Header="Lower temperature (°C)"
+                            Header="Ramp starts at (°C)"
                             SpinButtonPlacementMode="Compact"
-                            ValueChanged="OnEdited" />
+                            Value="{x:Bind ViewModel.Editor.LowInput, Mode=TwoWay}" />
                         <NumberBox
-                            x:Name="HighInputBox"
                             Grid.Column="1"
-                            Header="Upper temperature (°C)"
+                            Header="Ramp reaches full at (°C)"
                             SpinButtonPlacementMode="Compact"
-                            ValueChanged="OnEdited" />
+                            Value="{x:Bind ViewModel.Editor.HighInput, Mode=TwoWay}" />
                         <NumberBox
-                            x:Name="MinimumDutyBox"
                             Grid.Row="1"
-                            Header="Lower duty (%)"
+                            Header="Duty at the bottom (%)"
                             Maximum="100"
                             Minimum="0"
                             SpinButtonPlacementMode="Compact"
-                            ValueChanged="OnEdited" />
+                            Value="{x:Bind ViewModel.Editor.MinimumDuty, Mode=TwoWay}" />
                         <NumberBox
-                            x:Name="MaximumDutyBox"
                             Grid.Row="1"
                             Grid.Column="1"
-                            Header="Upper duty (%)"
+                            Header="Duty at the top (%)"
                             Maximum="100"
                             Minimum="0"
                             SpinButtonPlacementMode="Compact"
-                            ValueChanged="OnEdited" />
+                            Value="{x:Bind ViewModel.Editor.MaximumDuty, Mode=TwoWay}" />
                     </Grid>
 
-                    <!--  The picker. 193 sensors is not a dropdown, so it is a searchable tree.  -->
-                    <StackPanel Spacing="8" Visibility="{x:Bind local:CurvesPage.WhenReadsASensor(ViewModel.Editor), Mode=OneWay}">
-                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Reads" />
+                    <!--  Graph: the one kind with an interaction worth building.  -->
+                    <Border
+                        Padding="4"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Visibility="{x:Bind local:CurvesPage.When(ViewModel.Editor.IsGraph), Mode=OneWay}">
+                        <StackPanel>
+                            <controls:CurveCanvas x:Name="Canvas" Height="260" />
+                            <TextBlock
+                                Margin="8,0,8,6"
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="Click to add a point, drag to move it, right-click to remove it." />
+                        </StackPanel>
+                    </Border>
 
-                        <AutoSuggestBox
-                            PlaceholderText="Search sensors"
-                            QueryIcon="Find"
-                            Text="{x:Bind ViewModel.SensorPicker.Search, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    <!--
+                        Trigger: two speeds and a band between them. The thresholds are named for
+                        what they do rather than for which is larger, and the hold times are said as
+                        the sentences they are.
+                    -->
+                    <StackPanel Spacing="12" Visibility="{x:Bind local:CurvesPage.When(ViewModel.Editor.IsTrigger), Mode=OneWay}">
+                        <Grid ColumnSpacing="12" RowSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
 
-                        <!--
-                            Expanders rather than a TreeView: the shape is exactly two levels deep and
-                            never grows a third, and a TreeView costs a node graph built in code to
-                            express that.
-                        -->
-                        <ScrollViewer MaxHeight="300">
-                            <ItemsControl ItemsSource="{x:Bind ViewModel.SensorPicker.Groups}">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate x:DataType="sensors:SensorGroupViewModel">
-                                        <Expander
-                                            Margin="0,0,0,4"
-                                            HorizontalAlignment="Stretch"
-                                            HorizontalContentAlignment="Stretch"
-                                            Header="{x:Bind Name}">
-                                            <ItemsControl ItemsSource="{x:Bind Sensors}">
-                                                <ItemsControl.ItemTemplate>
-                                                    <DataTemplate x:DataType="sensors:SensorItemViewModel">
-                                                        <RadioButton
-                                                            Checked="OnSensorChosen"
-                                                            Content="{x:Bind local:CurvesPage.DescribeSensor(Name, ValueText), Mode=OneWay}"
-                                                            GroupName="CurveSource" />
-                                                    </DataTemplate>
-                                                </ItemsControl.ItemTemplate>
-                                            </ItemsControl>
-                                        </Expander>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </ScrollViewer>
+                            <NumberBox
+                                Header="Idle threshold (°C)"
+                                SpinButtonPlacementMode="Compact"
+                                Value="{x:Bind ViewModel.Editor.LowInput, Mode=TwoWay}" />
+                            <NumberBox
+                                Grid.Column="1"
+                                Header="Load threshold (°C)"
+                                SpinButtonPlacementMode="Compact"
+                                Value="{x:Bind ViewModel.Editor.HighInput, Mode=TwoWay}" />
+
+                            <NumberBox
+                                Grid.Row="1"
+                                Header="Duty while idle (%)"
+                                Maximum="100"
+                                Minimum="0"
+                                SpinButtonPlacementMode="Compact"
+                                Value="{x:Bind ViewModel.Editor.MinimumDuty, Mode=TwoWay}" />
+                            <NumberBox
+                                Grid.Row="1"
+                                Grid.Column="1"
+                                Header="Duty under load (%)"
+                                Maximum="100"
+                                Minimum="0"
+                                SpinButtonPlacementMode="Compact"
+                                Value="{x:Bind ViewModel.Editor.MaximumDuty, Mode=TwoWay}" />
+
+                            <NumberBox
+                                Grid.Row="2"
+                                Header="Must stay above the load threshold for (s)"
+                                Minimum="0"
+                                SpinButtonPlacementMode="Compact"
+                                Value="{x:Bind ViewModel.Editor.ResponseUpSeconds, Mode=TwoWay}" />
+                            <NumberBox
+                                Grid.Row="2"
+                                Grid.Column="1"
+                                Header="Must stay below the idle threshold for (s)"
+                                Minimum="0"
+                                SpinButtonPlacementMode="Compact"
+                                Value="{x:Bind ViewModel.Editor.ResponseDownSeconds, Mode=TwoWay}" />
+                        </Grid>
+
+                        <TextBlock
+                            FontSize="12"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="Between the two thresholds the curve holds whichever speed it last reached, so a temperature hovering on the line does not switch the fan back and forth."
+                            TextWrapping="Wrap" />
                     </StackPanel>
+
+                    <!--  Auto: a controller that seeks a temperature rather than mapping one.  -->
+                    <StackPanel Spacing="12" Visibility="{x:Bind local:CurvesPage.When(ViewModel.Editor.IsAuto), Mode=OneWay}">
+                        <Grid ColumnSpacing="12" RowSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <NumberBox
+                                Header="Idle below (°C)"
+                                SpinButtonPlacementMode="Compact"
+                                Value="{x:Bind ViewModel.Editor.LowInput, Mode=TwoWay}" />
+                            <NumberBox
+                                Grid.Column="1"
+                                Header="Temperature to hold (°C)"
+                                SpinButtonPlacementMode="Compact"
+                                Value="{x:Bind ViewModel.Editor.HighInput, Mode=TwoWay}" />
+
+                            <NumberBox
+                                Grid.Row="1"
+                                Header="Never go below (%)"
+                                Maximum="100"
+                                Minimum="0"
+                                SpinButtonPlacementMode="Compact"
+                                Value="{x:Bind ViewModel.Editor.MinimumDuty, Mode=TwoWay}" />
+                            <NumberBox
+                                Grid.Row="1"
+                                Grid.Column="1"
+                                Header="Never go above (%)"
+                                Maximum="100"
+                                Minimum="0"
+                                SpinButtonPlacementMode="Compact"
+                                Value="{x:Bind ViewModel.Editor.MaximumDuty, Mode=TwoWay}" />
+
+                            <NumberBox
+                                Grid.Row="2"
+                                Header="Adjust by (% each step)"
+                                Minimum="0"
+                                SpinButtonPlacementMode="Compact"
+                                Value="{x:Bind ViewModel.Editor.Step, Mode=TwoWay}" />
+                            <NumberBox
+                                Grid.Row="2"
+                                Grid.Column="1"
+                                Header="Close enough within (°C)"
+                                Minimum="0"
+                                SpinButtonPlacementMode="Compact"
+                                Value="{x:Bind ViewModel.Editor.Deadband, Mode=TwoWay}" />
+                        </Grid>
+
+                        <NumberBox
+                            Header="Wait between adjustments (s)"
+                            Minimum="0"
+                            SpinButtonPlacementMode="Compact"
+                            Value="{x:Bind ViewModel.Editor.ResponseUpSeconds, Mode=TwoWay}" />
+
+                        <TextBlock
+                            FontSize="12"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="This one does not map a temperature to a duty. It nudges the fan up or down until the temperature settles where you asked, which handles a machine whose cooling changes without you redrawing anything."
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <!--  Mix: other curves, never a temperature.  -->
+                    <StackPanel Spacing="12" Visibility="{x:Bind local:CurvesPage.When(ViewModel.Editor.IsMix), Mode=OneWay}">
+                        <ComboBox
+                            HorizontalAlignment="Stretch"
+                            Header="Take"
+                            ItemsSource="{x:Bind local:CurvesPage.MixFunctions}"
+                            SelectedItem="{x:Bind ViewModel.Editor.SelectedFunction, Mode=TwoWay}" />
+
+                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Of these curves" />
+
+                        <TextBlock
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="There are no other curves yet. Make another one and it will appear here."
+                            TextWrapping="Wrap"
+                            Visibility="{x:Bind local:CurvesPage.WhenNot(ViewModel.Editor.HasOtherCurves), Mode=OneWay}" />
+
+                        <ItemsControl ItemsSource="{x:Bind ViewModel.Editor.CurveChoices, Mode=OneWay}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="curves:CurveChoiceViewModel">
+                                    <CheckBox Content="{x:Bind Name}" IsChecked="{x:Bind IsSelected, Mode=TwoWay}" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+
+                    <!--  Sync: mirror a curve, or mirror a fan.  -->
+                    <StackPanel Spacing="12" Visibility="{x:Bind local:CurvesPage.When(ViewModel.Editor.IsSync), Mode=OneWay}">
+                        <RadioButtons
+                            Header="Follow"
+                            SelectedIndex="{x:Bind ViewModel.Editor.SyncSourceIndex, Mode=TwoWay}">
+                            <x:String>Another curve</x:String>
+                            <x:String>A fan</x:String>
+                        </RadioButtons>
+
+                        <ComboBox
+                            HorizontalAlignment="Stretch"
+                            Header="Which curve"
+                            ItemsSource="{x:Bind ViewModel.Editor.CurveChoices, Mode=OneWay}"
+                            SelectedItem="{x:Bind ViewModel.Editor.SelectedCurve, Mode=TwoWay}"
+                            Visibility="{x:Bind local:CurvesPage.When(ViewModel.Editor.FollowsCurve), Mode=OneWay}" />
+
+                        <ComboBox
+                            HorizontalAlignment="Stretch"
+                            Header="Which fan"
+                            ItemsSource="{x:Bind ViewModel.Editor.ControlChoices, Mode=OneWay}"
+                            SelectedItem="{x:Bind ViewModel.Editor.SelectedControl, Mode=TwoWay}"
+                            Visibility="{x:Bind local:CurvesPage.When(ViewModel.Editor.FollowsControl), Mode=OneWay}" />
+
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <NumberBox
+                                Header="Offset"
+                                SpinButtonPlacementMode="Compact"
+                                Value="{x:Bind ViewModel.Editor.Offset, Mode=TwoWay}" />
+
+                            <CheckBox
+                                Grid.Column="1"
+                                VerticalAlignment="Bottom"
+                                Content="Offset is a percentage of the source"
+                                IsChecked="{x:Bind ViewModel.Editor.Proportional, Mode=TwoWay}" />
+                        </Grid>
+                    </StackPanel>
+
+                    <!--
+                        Hysteresis, for the two kinds that map a reading straight onto a duty. The
+                        others have thresholds and hold times of their own, and two mechanisms
+                        arguing over one decision is worse than either.
+                    -->
+                    <Expander
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch"
+                        Header="Steadiness"
+                        Visibility="{x:Bind local:CurvesPage.When(ViewModel.Editor.HasHysteresis), Mode=OneWay}">
+                        <StackPanel Spacing="12">
+                            <TextBlock
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="Leave these at zero and the fan follows the sensor exactly. Raise them and small or brief changes are ignored, which is what stops a fan hunting around one temperature."
+                                TextWrapping="Wrap" />
+
+                            <Grid ColumnSpacing="12" RowSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <NumberBox
+                                    Header="Ignore rises smaller than (°C)"
+                                    Minimum="0"
+                                    SpinButtonPlacementMode="Compact"
+                                    Value="{x:Bind ViewModel.Editor.DeadbandUp, Mode=TwoWay}" />
+                                <NumberBox
+                                    Grid.Column="1"
+                                    Header="Ignore falls smaller than (°C)"
+                                    Minimum="0"
+                                    SpinButtonPlacementMode="Compact"
+                                    Value="{x:Bind ViewModel.Editor.DeadbandDown, Mode=TwoWay}" />
+
+                                <NumberBox
+                                    Grid.Row="1"
+                                    Header="A rise must last (s)"
+                                    Minimum="0"
+                                    SpinButtonPlacementMode="Compact"
+                                    Value="{x:Bind ViewModel.Editor.HysteresisUpSeconds, Mode=TwoWay}" />
+                                <NumberBox
+                                    Grid.Row="1"
+                                    Grid.Column="1"
+                                    Header="A fall must last (s)"
+                                    Minimum="0"
+                                    SpinButtonPlacementMode="Compact"
+                                    Value="{x:Bind ViewModel.Editor.HysteresisDownSeconds, Mode=TwoWay}" />
+                            </Grid>
+                        </StackPanel>
+                    </Expander>
                 </StackPanel>
             </StackPanel>
         </ScrollViewer>

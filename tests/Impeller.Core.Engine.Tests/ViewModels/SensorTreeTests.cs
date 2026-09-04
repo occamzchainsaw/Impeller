@@ -199,4 +199,66 @@ public class SensorTreeTests
 
         Assert.Equal("—", tree.Groups[0].Sensors[0].ValueText);
     }
+
+    [Fact]
+    public void The_chosen_row_knows_it_is_the_chosen_one()
+    {
+        // A radio button inside a data template cannot ask the tree whether it is the selection, so
+        // the answer is carried on the row. Without it the picker opened with nothing checked
+        // however long ago the choice had been made.
+        var sensors = new[]
+        {
+            Sensor("Board", "CPU", SensorKind.Temperature, "lhm/board/0/temperature/0", 40f),
+            Sensor("Board", "System", SensorKind.Temperature, "lhm/board/0/temperature/1", 30f),
+        };
+
+        var tree = new SensorTreeViewModel();
+        tree.Load(sensors);
+
+        tree.Select(sensors[0].Id);
+        Assert.True(tree.Groups[0].Sensors[0].IsSelected);
+
+        tree.Select(sensors[1].Id);
+
+        Assert.False(tree.Groups[0].Sensors[0].IsSelected);
+        Assert.True(tree.Groups[0].Sensors[1].IsSelected);
+    }
+
+    [Fact]
+    public void Choosing_nothing_clears_the_choice()
+    {
+        // How a brand new curve is opened. It reads nothing yet, and a picker still showing the
+        // previous curve's sensor would name a sensor this curve does not actually read — a panel
+        // disagreeing with the thing it would save.
+        var sensors = new[] { Sensor("Board", "CPU", SensorKind.Temperature, "lhm/board/0/temperature/0", 40f) };
+
+        var tree = new SensorTreeViewModel();
+        tree.Load(sensors);
+        tree.Select(sensors[0].Id);
+
+        tree.Select(SensorId.None);
+
+        Assert.Null(tree.Selected);
+        Assert.False(tree.Groups[0].Sensors[0].IsSelected);
+    }
+
+    [Fact]
+    public void A_choice_that_survives_a_search_is_still_shown_as_chosen()
+    {
+        // Filtering rebuilds every row, so the flag has to be set on the replacement rather than
+        // left on the object that was thrown away.
+        var sensors = new[]
+        {
+            Sensor("Board", "CPU package", SensorKind.Temperature, "lhm/board/0/temperature/0", 40f),
+            Sensor("Board", "System", SensorKind.Temperature, "lhm/board/0/temperature/1", 30f),
+        };
+
+        var tree = new SensorTreeViewModel();
+        tree.Load(sensors);
+        tree.Select(sensors[0].Id);
+
+        tree.Search = "package";
+
+        Assert.True(tree.Groups[0].Sensors[0].IsSelected);
+    }
 }

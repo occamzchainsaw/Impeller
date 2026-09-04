@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Impeller.App.ViewModels.Curves;
@@ -75,6 +76,71 @@ public sealed partial class CurvesViewModel(EngineConnection connection, Notific
     [ObservableProperty]
     public partial bool IsDirty { get; set; }
 
+    /// <summary>
+    /// The sensor the open curve reads, and what it says right now.
+    /// </summary>
+    /// <remarks>
+    /// The line above the picker, so the picker itself can be folded away. A curve editor that
+    /// showed a hundred and ninety-three radio buttons and never said which one was chosen made the
+    /// most important fact on the panel the hardest one to find.
+    /// </remarks>
+    public string ReadsText => SensorPicker.Selected is { } sensor
+        ? $"{sensor.Name} — {sensor.ValueText}"
+        : "No sensor chosen yet";
+
+    /// <summary>Whether a sensor has been chosen at all.</summary>
+    public bool HasSource => SensorPicker.Selected is not null;
+
+    /// <summary>
+    /// Follows the open editor, so any change to it marks the curve unsaved.
+    /// </summary>
+    /// <remarks>
+    /// One handler rather than an event wired to each of thirty controls. The page binds two-way and
+    /// says nothing about dirtiness; this notices. The two exclusions are the live read-out, which
+    /// changes once a second on its own and would otherwise mark every open curve unsaved within a
+    /// second of opening it.
+    /// </remarks>
+    partial void OnEditorChanged(CurveEditorViewModel? oldValue, CurveEditorViewModel? newValue)
+    {
+        if (oldValue is not null)
+        {
+            oldValue.PropertyChanged -= OnEditorEdited;
+        }
+
+        if (newValue is not null)
+        {
+            newValue.PropertyChanged += OnEditorEdited;
+        }
+    }
+
+    private void OnEditorEdited(object? sender, PropertyChangedEventArgs e)
+    {
+        if (sender is not CurveEditorViewModel editor
+            || e.PropertyName is nameof(CurveEditorViewModel.LiveOutput)
+                or nameof(CurveEditorViewModel.OutputText))
+        {
+            return;
+        }
+
+        // The list on the left carries the name, and a rename that only showed up after saving
+        // would leave the user looking at two different names for one curve.
+        if (e.PropertyName == nameof(CurveEditorViewModel.Name) && Selected is { } selected)
+        {
+            selected.Name = editor.Name;
+        }
+
+        IsDirty = true;
+    }
+
+    /// <inheritdoc />
+    protected override void OnDisposing()
+    {
+        if (Editor is { } editor)
+        {
+            editor.PropertyChanged -= OnEditorEdited;
+        }
+    }
+
     /// <inheritdoc />
     protected override void OnSnapshot(EngineSnapshot snapshot)
     {
@@ -110,21 +176,110 @@ public sealed partial class CurvesViewModel(EngineConnection connection, Notific
     }
 
     /// <inheritdoc />
-    protected override void OnTick(TickSnapshot tick) => SensorPicker.Apply(tick);
-
-    partial void OnSelectedChanged(CurveListItemViewModel? value)
+    /// <remarks>
+    /// The live read-out is the reason this page follows ticks at all now. It turns the editor from
+    /// a form into something you can watch respond, which is the only way to tell a badly shaped
+    /// curve from a well shaped one without waiting for the machine to get hot.
+    /// </remarks>
+    protected override void OnTick(TickSnapshot tick)
     {
-        if (value is null
+        SensorPicker.Apply(tick);
+
+        // The reading inside it moved even though the selection did not.
+        OnPropertyChanged(nameof(ReadsText));
+
+        if (Editor is not { } editor)
+        {
+            return;
+        }
+
+        foreach (var reading in tick.Curves)
+        {
+            if (reading.Id == editor.Id)
+            {
+                editor.LiveOutput = reading.Output?.Percent;
+                return;
+            }
+        }
+
+        // Not in the tick at all: an unsaved curve the engine has never seen. Saying "no output" is
+        // honest, and saying nothing would leave the last saved curve's number under a new one.
+        editor.LiveOutput = null;
+    }
+
+    /// <summary>
+    /// Records which sensor the open curve should read.
+    /// </summary>
+    /// <remarks>
+    /// Here rather than on the tree, because choosing one is an edit: it has to mark the curve
+    /// unsaved and refresh the line the picker is folded behind.
+    /// </remarks>
+    public void ChooseSensor(SensorItemViewModel sensor)
+    {
+        ArgumentNullException.ThrowIfNull(sensor);
+
+        SensorPicker.Selected = sensor;
+
+        if (Editor is { } editor)
+        {
+            editor.Source = sensor.Id;
+        }
+
+        OnPropertyChanged(nameof(ReadsText));
+        OnPropertyChanged(nameof(HasSource));
+        IsDirty = true;
+    }
+
+    partial void OnSelectedChanged(CurveListItemViewModel? oldValue, CurveListItemViewModel? newValue)
+    {
+        // A curve added and never saved is not in the configuration, so leaving its row behind
+        // gives the user something to click that opens a blank panel. Add's own promise is that a
+        // mis-click leaves nothing behind; this is what makes that true.
+        if (oldValue is not null && !IsSaved(oldValue))
+        {
+            Curves.Remove(oldValue);
+        }
+
+        if (newValue is null
             || Snapshot is not { } snapshot
-            || snapshot.Configuration.Curves.FirstOrDefault(curve => curve.Id == value.Id) is not { } definition)
+            || snapshot.Configuration.Curves.FirstOrDefault(curve => curve.Id == newValue.Id) is not { } definition)
         {
             Editor = null;
             return;
         }
 
-        Editor = new CurveEditorViewModel(definition);
+        Editor = new CurveEditorViewModel(definition, OptionsFor(definition));
         SensorPicker.Select(Editor.Source);
         IsDirty = false;
+
+        OnPropertyChanged(nameof(ReadsText));
+        OnPropertyChanged(nameof(HasSource));
+    }
+
+    /// <summary>
+    /// Everything the open curve could point at.
+    /// </summary>
+    /// <remarks>
+    /// Built fresh for each editor rather than kept and handed round: a mix ticks the boxes on
+    /// these, so a shared set would carry one curve's choices into the next one opened.
+    /// </remarks>
+    private CurveEditorOptions OptionsFor(CurveDefinition definition)
+    {
+        if (Snapshot is not { } snapshot)
+        {
+            return CurveEditorOptions.Empty;
+        }
+
+        var curves = snapshot.Configuration.Curves
+            .Where(curve => curve.Id != definition.Id)
+            .Select(curve => new CurveChoiceViewModel(curve.Id, curve.Name))
+            .ToArray();
+
+        var controls = snapshot.Controls
+            .Select(control => new ControlChoice(control.Id, control.DisplayName))
+            .ToArray();
+
+        return new CurveEditorOptions(curves, controls);
     }
 
     /// <summary>
@@ -183,8 +338,16 @@ public sealed partial class CurvesViewModel(EngineConnection connection, Notific
         Curves.Add(item);
 
         Selected = item;
-        Editor = new CurveEditorViewModel(definition);
+        Editor = new CurveEditorViewModel(definition, OptionsFor(definition));
         IsDirty = true;
+
+        // Cleared rather than left. Setting Selected above cannot open the editor - the curve is
+        // not in the configuration yet - so the picker still holds the last curve's sensor, and a
+        // brand new curve would show a Reads line naming a sensor it does not actually read.
+        SensorPicker.Select(Editor.Source);
+
+        OnPropertyChanged(nameof(ReadsText));
+        OnPropertyChanged(nameof(HasSource));
     }
 
     /// <summary>Saves the open curve into the configuration and applies it.</summary>
@@ -194,11 +357,6 @@ public sealed partial class CurvesViewModel(EngineConnection connection, Notific
         if (Editor is not { } editor || Snapshot is not { } snapshot)
         {
             return;
-        }
-
-        if (SensorPicker.Selected is { } sensor)
-        {
-            editor.Source = sensor.Id;
         }
 
         var definition = editor.Build();
@@ -255,7 +413,13 @@ public sealed partial class CurvesViewModel(EngineConnection connection, Notific
         }).ConfigureAwait(true);
     }
 
-    /// <summary>Throws away the open curve's unsaved changes.</summary>
+    /// <summary>
+    /// Throws away the open curve's unsaved changes.
+    /// </summary>
+    /// <remarks>
+    /// For a curve that was never saved this discards the curve itself, which is the only thing
+    /// reverting it could mean.
+    /// </remarks>
     [RelayCommand]
     private void Revert()
     {
@@ -263,8 +427,14 @@ public sealed partial class CurvesViewModel(EngineConnection connection, Notific
 
         var selected = Selected;
         Selected = null;
-        Selected = selected;
+
+        // Null unless it survived being deselected, which a never-saved curve does not.
+        Selected = selected is not null && Curves.Contains(selected) ? selected : null;
     }
+
+    /// <summary>Whether the engine has this curve, as opposed to it only existing on this page.</summary>
+    private bool IsSaved(CurveListItemViewModel item) =>
+        Snapshot is { } snapshot && snapshot.Configuration.Curves.Any(curve => curve.Id == item.Id);
 
     private async Task<bool> ApplyAsync(ImpellerConfiguration configuration)
     {

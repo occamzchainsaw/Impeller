@@ -42,14 +42,65 @@ public sealed partial class CurvePointViewModel(float input, float duty) : Obser
     public partial float Duty { get; set; } = duty;
 }
 
+/// <summary>Another curve, as something this one could point at.</summary>
+public sealed partial class CurveChoiceViewModel(CurveId id, string name) : ObservableObject
+{
+    /// <summary>Which curve.</summary>
+    public CurveId Id { get; } = id;
+
+    /// <summary>What the user calls it.</summary>
+    public string Name { get; } = name;
+
+    /// <summary>Whether this curve is one of the inputs. Only a mix uses this.</summary>
+    [ObservableProperty]
+    public partial bool IsSelected { get; set; }
+
+    /// <inheritdoc />
+    public override string ToString() => Name;
+}
+
+/// <summary>A control, as something a sync curve could follow.</summary>
+public sealed record ControlChoice(SensorId Id, string Name)
+{
+    /// <inheritdoc />
+    public override string ToString() => Name;
+}
+
+/// <summary>A way of combining curves, in words rather than an enum name.</summary>
+public sealed record MixFunctionChoice(MixFunction Function, string Label)
+{
+    /// <inheritdoc />
+    public override string ToString() => Label;
+}
+
+/// <summary>
+/// What a curve could point at: every other curve, and every control.
+/// </summary>
+/// <remarks>
+/// Supplied rather than reached for, because the editor holds no connection and knows nothing about
+/// the configuration it came out of. A mix with nothing to mix and a sync with nothing to follow are
+/// both real states, and both look like an empty list.
+/// </remarks>
+public sealed record CurveEditorOptions(
+    IReadOnlyList<CurveChoiceViewModel> Curves,
+    IReadOnlyList<ControlChoice> Controls)
+{
+    /// <summary>Nothing to point at, for a curve opened without a configuration behind it.</summary>
+    public static CurveEditorOptions Empty { get; } = new([], []);
+}
+
 /// <summary>
 /// One curve, opened for editing.
 /// </summary>
 /// <remarks>
 /// <para>
-/// A single editor for all seven kinds rather than seven view models, because six of the seven are
-/// a handful of numbers and only the graph has an interaction worth building. What the view needs
-/// to know is which panel to show, which is what <see cref="Kind"/> is for.
+/// One editor for all seven kinds rather than seven view models: they share identity, a name and
+/// most of their numbers, and the differences are which of those numbers mean anything. What the
+/// view needs to know is which panel to show, which is what <see cref="Kind"/> and the
+/// <c>Is…</c> predicates below are for. The panel a kind gets shows only its own fields — the
+/// four-box grid that served all seven at once offered a mix curve a temperature range it could not
+/// use, gave a flat curve a lower and an upper value, and called an auto curve's target an "upper
+/// temperature".
 /// </para>
 /// <para>
 /// Nothing here reaches the engine. The editor produces a <see cref="CurveDefinition"/> and the page
@@ -60,15 +111,43 @@ public sealed partial class CurvePointViewModel(float input, float duty) : Obser
 /// </remarks>
 public sealed partial class CurveEditorViewModel : ObservableObject
 {
+    /// <summary>The ways a mix can combine its inputs, in the order they are worth trying.</summary>
+    public static IReadOnlyList<MixFunctionChoice> MixFunctions { get; } =
+    [
+        new(MixFunction.Maximum, "Whichever is highest"),
+        new(MixFunction.Minimum, "Whichever is lowest"),
+        new(MixFunction.Average, "The average of them"),
+        new(MixFunction.Sum, "All of them added up"),
+        new(MixFunction.Difference, "The first, minus the rest"),
+    ];
+
     private readonly CurveDefinition _original;
 
     public CurveEditorViewModel(CurveDefinition definition)
+        : this(definition, CurveEditorOptions.Empty)
+    {
+    }
+
+    public CurveEditorViewModel(CurveDefinition definition, CurveEditorOptions options)
     {
         ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(options);
 
         _original = definition;
         Id = definition.Id;
         Name = definition.Name;
+
+        foreach (var control in options.Controls)
+        {
+            ControlChoices.Add(control);
+        }
+
+        // A curve may not be one of its own inputs: a mix that includes itself is a cycle the
+        // engine refuses, and offering it is offering a way to break the configuration.
+        foreach (var curve in options.Curves.Where(curve => curve.Id != definition.Id))
+        {
+            CurveChoices.Add(curve);
+        }
 
         switch (definition)
         {
@@ -84,13 +163,13 @@ public sealed partial class CurveEditorViewModel : ObservableObject
                 HighInput = linear.MaximumInput;
                 MinimumDuty = linear.MinimumDuty.Percent;
                 MaximumDuty = linear.MaximumDuty.Percent;
-                Hysteresis = linear.Hysteresis;
+                TakeHysteresis(linear.Hysteresis);
                 break;
 
             case GraphCurveDefinition graph:
                 Kind = CurveEditorKind.Graph;
                 Source = graph.Source;
-                Hysteresis = graph.Hysteresis;
+                TakeHysteresis(graph.Hysteresis);
 
                 foreach (var point in graph.Points.OrderBy(point => point.Input))
                 {
@@ -103,9 +182,9 @@ public sealed partial class CurveEditorViewModel : ObservableObject
                 Kind = CurveEditorKind.Mix;
                 Function = mix.Function;
 
-                foreach (var source in mix.Sources)
+                foreach (var choice in CurveChoices)
                 {
-                    SourceCurves.Add(source);
+                    choice.IsSelected = mix.Sources.Contains(choice.Id);
                 }
 
                 break;
@@ -126,8 +205,8 @@ public sealed partial class CurveEditorViewModel : ObservableObject
                 HighInput = trigger.LoadInput;
                 MinimumDuty = trigger.IdleDuty.Percent;
                 MaximumDuty = trigger.LoadDuty.Percent;
-                ResponseUp = trigger.ResponseUp;
-                ResponseDown = trigger.ResponseDown;
+                ResponseUpSeconds = trigger.ResponseUp.TotalSeconds;
+                ResponseDownSeconds = trigger.ResponseDown.TotalSeconds;
                 break;
 
             case AutoCurveDefinition auto:
@@ -139,12 +218,22 @@ public sealed partial class CurveEditorViewModel : ObservableObject
                 MaximumDuty = auto.MaximumDuty.Percent;
                 Step = auto.Step;
                 Deadband = auto.Deadband;
-                ResponseUp = auto.ResponseTime;
+                ResponseUpSeconds = auto.ResponseTime.TotalSeconds;
                 break;
 
             default:
                 Kind = CurveEditorKind.Flat;
                 break;
+        }
+
+        SelectedCurve = CurveChoices.FirstOrDefault(curve => curve.Id == SourceCurve);
+        SelectedControl = ControlChoices.FirstOrDefault(control => control.Id == SourceControl);
+
+        // Ticking a mix input changes the row, not this object, and the page above watches this
+        // object to know the curve is unsaved. Forwarded rather than left for the view to notice.
+        foreach (var choice in CurveChoices)
+        {
+            choice.PropertyChanged += (_, _) => OnPropertyChanged(nameof(CurveChoices));
         }
     }
 
@@ -165,32 +254,111 @@ public sealed partial class CurveEditorViewModel : ObservableObject
     /// <summary>The vertices of a graph curve, always in ascending input order.</summary>
     public ObservableCollection<CurvePointViewModel> Points { get; } = [];
 
-    /// <summary>The curves a mix combines.</summary>
-    public ObservableCollection<CurveId> SourceCurves { get; } = [];
+    /// <summary>Every other curve, for a mix to tick and a sync to pick from.</summary>
+    public ObservableCollection<CurveChoiceViewModel> CurveChoices { get; } = [];
 
-    /// <summary>The lower reading: a ramp's start, a trigger's idle threshold, an auto curve's idle.</summary>
+    /// <summary>Every control, for a sync to follow.</summary>
+    public ObservableCollection<ControlChoice> ControlChoices { get; } = [];
+
+    /// <summary>Which of the two things a sync curve can follow is chosen: 0 a curve, 1 a control.</summary>
+    /// <remarks>
+    /// An index because that is what a <c>RadioButtons</c> holds. The enum has a third value, None,
+    /// which is a state and not a choice: a curve that has picked neither shows the curve picker,
+    /// because that is much the commoner of the two and an empty panel looks broken.
+    /// </remarks>
+    public int SyncSourceIndex
+    {
+        get => SyncSourceKind == SyncSourceKind.Control ? 1 : 0;
+        set => SyncSourceKind = value == 1 ? SyncSourceKind.Control : SyncSourceKind.Curve;
+    }
+
+    /// <summary>Whether there is anything for a mix or a sync to point at.</summary>
+    /// <remarks>
+    /// A mix in a configuration with one curve is not broken, it is premature — and an empty list
+    /// with no sentence beside it looks like the former.
+    /// </remarks>
+    public bool HasOtherCurves => CurveChoices.Count > 0;
+
+    /// <summary>
+    /// The lower reading: a ramp's start, a trigger's idle threshold, an auto curve's idle.
+    /// </summary>
+    /// <remarks>
+    /// Doubles throughout, here and below, because that is what a <c>NumberBox</c> and a
+    /// <c>Slider</c> hold and two-way binding wants the types to match exactly. The alternative is a
+    /// page of hand-written fill-and-write-back code, which is what this replaced — and which had
+    /// already produced one bug where switching curves wrote the old one's numbers into the new one.
+    /// </remarks>
     [ObservableProperty]
-    public partial float LowInput { get; set; }
+    public partial double LowInput { get; set; }
 
     /// <summary>The upper reading.</summary>
     [ObservableProperty]
-    public partial float HighInput { get; set; } = 70f;
+    public partial double HighInput { get; set; } = 70d;
 
     /// <summary>The floor of the duty range, and a flat curve's only value.</summary>
     [ObservableProperty]
-    public partial float MinimumDuty { get; set; }
+    public partial double MinimumDuty { get; set; }
 
     /// <summary>The ceiling.</summary>
     [ObservableProperty]
-    public partial float MaximumDuty { get; set; } = 100f;
+    public partial double MaximumDuty { get; set; } = 100d;
 
     /// <summary>How a mix combines its inputs.</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SelectedFunction))]
     public partial MixFunction Function { get; set; }
+
+    /// <summary>The same choice, as the item a combo box holds.</summary>
+    public MixFunctionChoice? SelectedFunction
+    {
+        get => MixFunctions.FirstOrDefault(choice => choice.Function == Function);
+        set
+        {
+            if (value is not null)
+            {
+                Function = value.Function;
+            }
+        }
+    }
 
     /// <summary>Whether a sync curve follows a curve or a control.</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(FollowsCurve))]
+    [NotifyPropertyChangedFor(nameof(FollowsControl))]
+    [NotifyPropertyChangedFor(nameof(SyncSourceIndex))]
     public partial SyncSourceKind SyncSourceKind { get; set; }
+
+    /// <summary>
+    /// Whether the sync panel should offer curves.
+    /// </summary>
+    /// <remarks>
+    /// The default for a curve that has chosen neither. A brand new sync curve showing no picker at
+    /// all looks broken, and following another curve is much the commoner of the two.
+    /// </remarks>
+    public bool FollowsCurve
+    {
+        get => SyncSourceKind != SyncSourceKind.Control;
+        set
+        {
+            if (value)
+            {
+                SyncSourceKind = SyncSourceKind.Curve;
+            }
+        }
+    }
+
+    /// <summary>Whether it should offer controls instead.</summary>
+    public bool FollowsControl
+    {
+        get => SyncSourceKind == SyncSourceKind.Control;
+        set
+        {
+            if (value)
+            {
+                SyncSourceKind = SyncSourceKind.Control;
+            }
+        }
+    }
 
     /// <summary>The curve a sync follows.</summary>
     [ObservableProperty]
@@ -200,32 +368,116 @@ public sealed partial class CurveEditorViewModel : ObservableObject
     [ObservableProperty]
     public partial SensorId SourceControl { get; set; } = SensorId.None;
 
+    /// <summary>The same curve, as the item a combo box holds.</summary>
+    [ObservableProperty]
+    public partial CurveChoiceViewModel? SelectedCurve { get; set; }
+
+    /// <summary>The same control.</summary>
+    [ObservableProperty]
+    public partial ControlChoice? SelectedControl { get; set; }
+
     /// <summary>A sync curve's shift.</summary>
     [ObservableProperty]
-    public partial float Offset { get; set; }
+    public partial double Offset { get; set; }
 
-    /// <summary>Whether that shift scales rather than adds.</summary>
+    /// <summary>Whether that shift scales the source rather than adding to it.</summary>
     [ObservableProperty]
     public partial bool Proportional { get; set; }
 
     /// <summary>An auto curve's adjustment size, in percentage points.</summary>
     [ObservableProperty]
-    public partial float Step { get; set; } = 2f;
+    public partial double Step { get; set; } = 2d;
 
     /// <summary>How far below the target still counts as on target.</summary>
     [ObservableProperty]
-    public partial float Deadband { get; set; } = 3f;
+    public partial double Deadband { get; set; } = 3d;
 
-    /// <summary>How long a rise must hold before it is acted on.</summary>
+    /// <summary>
+    /// How long a rise must hold before it is acted on, in seconds.
+    /// </summary>
+    /// <remarks>
+    /// Seconds rather than a <see cref="TimeSpan"/> because that is what the box on screen accepts,
+    /// and a view model that made the view do the conversion would be making the view do arithmetic.
+    /// </remarks>
     [ObservableProperty]
-    public partial TimeSpan ResponseUp { get; set; } = TimeSpan.FromSeconds(2);
+    public partial double ResponseUpSeconds { get; set; } = 2d;
 
     /// <summary>How long a fall must hold.</summary>
     [ObservableProperty]
-    public partial TimeSpan ResponseDown { get; set; } = TimeSpan.FromSeconds(4);
+    public partial double ResponseDownSeconds { get; set; } = 4d;
 
-    /// <summary>Change suppression on the input, for the kinds that carry it.</summary>
-    public HysteresisDefinition Hysteresis { get; set; }
+    /// <summary>How far the reading must rise before a rise counts, in the sensor's own units.</summary>
+    [ObservableProperty]
+    public partial double DeadbandUp { get; set; }
+
+    /// <summary>How far it must fall.</summary>
+    [ObservableProperty]
+    public partial double DeadbandDown { get; set; }
+
+    /// <summary>How long a rise must persist before the curve acts on it, in seconds.</summary>
+    [ObservableProperty]
+    public partial double HysteresisUpSeconds { get; set; }
+
+    /// <summary>How long a fall must persist.</summary>
+    [ObservableProperty]
+    public partial double HysteresisDownSeconds { get; set; }
+
+    /// <summary>
+    /// What this curve is asking for right now, or null when it has no answer.
+    /// </summary>
+    /// <remarks>
+    /// Pushed in from the tick rather than worked out here. Four of the seven kinds carry state — a
+    /// trigger latches, an auto curve integrates, a sync follows something that does — so the only
+    /// honest answer is the engine's own.
+    /// </remarks>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(OutputText))]
+    public partial float? LiveOutput { get; set; }
+
+    /// <summary>That output, in words.</summary>
+    public string OutputText => LiveOutput is { } duty ? $"{duty:0.#} %" : "no output";
+
+    /// <summary>Whether it is a flat curve, which is a constant and needs one control.</summary>
+    public bool IsFlat => Kind == CurveEditorKind.Flat;
+
+    /// <summary>Whether it is a straight ramp.</summary>
+    public bool IsLinear => Kind == CurveEditorKind.Linear;
+
+    /// <summary>Whether it is the one kind with a canvas.</summary>
+    public bool IsGraph => Kind == CurveEditorKind.Graph;
+
+    /// <summary>Whether it combines other curves.</summary>
+    public bool IsMix => Kind == CurveEditorKind.Mix;
+
+    /// <summary>Whether it mirrors something else.</summary>
+    public bool IsSync => Kind == CurveEditorKind.Sync;
+
+    /// <summary>Whether it is two speeds with a band between them.</summary>
+    public bool IsTrigger => Kind == CurveEditorKind.Trigger;
+
+    /// <summary>Whether it seeks a target temperature.</summary>
+    public bool IsAuto => Kind == CurveEditorKind.Auto;
+
+    /// <summary>
+    /// Whether it reads a sensor at all.
+    /// </summary>
+    /// <remarks>
+    /// Mix and sync read other curves, and flat reads nothing. Offering any of them a temperature is
+    /// offering a setting that does nothing.
+    /// </remarks>
+    public bool ReadsASensor => Kind
+        is CurveEditorKind.Linear or CurveEditorKind.Graph
+        or CurveEditorKind.Trigger or CurveEditorKind.Auto;
+
+    /// <summary>
+    /// Whether change suppression applies to it.
+    /// </summary>
+    /// <remarks>
+    /// Only the two kinds that map a reading straight onto a duty. A trigger already has thresholds
+    /// and hold times of its own, and an auto curve a deadband — giving either a second set would be
+    /// two mechanisms arguing over the same decision.
+    /// </remarks>
+    public bool HasHysteresis => Kind is CurveEditorKind.Linear or CurveEditorKind.Graph;
 
     /// <summary>The lowest reading the graph canvas draws.</summary>
     public float AxisMinimum { get; set; }
@@ -308,7 +560,7 @@ public sealed partial class CurveEditorViewModel : ObservableObject
         {
             Id = Id,
             Name = Name,
-            Duty = new Duty(MinimumDuty),
+            Duty = new Duty(Percent(MinimumDuty)),
         },
 
         CurveEditorKind.Linear => new LinearCurveDefinition
@@ -316,11 +568,11 @@ public sealed partial class CurveEditorViewModel : ObservableObject
             Id = Id,
             Name = Name,
             Source = Source,
-            MinimumInput = LowInput,
-            MaximumInput = HighInput,
-            MinimumDuty = new Duty(MinimumDuty),
-            MaximumDuty = new Duty(MaximumDuty),
-            Hysteresis = Hysteresis,
+            MinimumInput = Number(LowInput),
+            MaximumInput = Number(HighInput),
+            MinimumDuty = new Duty(Percent(MinimumDuty)),
+            MaximumDuty = new Duty(Percent(MaximumDuty)),
+            Hysteresis = BuildHysteresis(),
         },
 
         CurveEditorKind.Graph => new GraphCurveDefinition
@@ -329,7 +581,7 @@ public sealed partial class CurveEditorViewModel : ObservableObject
             Name = Name,
             Source = Source,
             Points = [.. Points.Select(point => new CurvePointDefinition(point.Input, new Duty(point.Duty)))],
-            Hysteresis = Hysteresis,
+            Hysteresis = BuildHysteresis(),
         },
 
         CurveEditorKind.Mix => new MixCurveDefinition
@@ -337,7 +589,10 @@ public sealed partial class CurveEditorViewModel : ObservableObject
             Id = Id,
             Name = Name,
             Function = Function,
-            Sources = [.. SourceCurves],
+
+            // In the order they are listed, which for Difference is the order that decides which one
+            // everything else is subtracted from.
+            Sources = [.. CurveChoices.Where(curve => curve.IsSelected).Select(curve => curve.Id)],
         },
 
         CurveEditorKind.Sync => new SyncCurveDefinition
@@ -345,9 +600,9 @@ public sealed partial class CurveEditorViewModel : ObservableObject
             Id = Id,
             Name = Name,
             SourceKind = SyncSourceKind,
-            SourceCurve = SourceCurve,
-            SourceControl = SourceControl,
-            Offset = Offset,
+            SourceCurve = SelectedCurve?.Id ?? CurveId.None,
+            SourceControl = SelectedControl?.Id ?? SensorId.None,
+            Offset = Number(Offset),
             Proportional = Proportional,
         },
 
@@ -356,12 +611,12 @@ public sealed partial class CurveEditorViewModel : ObservableObject
             Id = Id,
             Name = Name,
             Source = Source,
-            IdleInput = LowInput,
-            LoadInput = HighInput,
-            IdleDuty = new Duty(MinimumDuty),
-            LoadDuty = new Duty(MaximumDuty),
-            ResponseUp = ResponseUp,
-            ResponseDown = ResponseDown,
+            IdleInput = Number(LowInput),
+            LoadInput = Number(HighInput),
+            IdleDuty = new Duty(Percent(MinimumDuty)),
+            LoadDuty = new Duty(Percent(MaximumDuty)),
+            ResponseUp = Seconds(ResponseUpSeconds),
+            ResponseDown = Seconds(ResponseDownSeconds),
         },
 
         CurveEditorKind.Auto => new AutoCurveDefinition
@@ -369,18 +624,60 @@ public sealed partial class CurveEditorViewModel : ObservableObject
             Id = Id,
             Name = Name,
             Source = Source,
-            IdleTemperature = LowInput,
-            LoadTemperature = HighInput,
-            MinimumDuty = new Duty(MinimumDuty),
-            MaximumDuty = new Duty(MaximumDuty),
-            Step = Step,
-            Deadband = Deadband,
-            ResponseTime = ResponseUp,
+            IdleTemperature = Number(LowInput),
+            LoadTemperature = Number(HighInput),
+            MinimumDuty = new Duty(Percent(MinimumDuty)),
+            MaximumDuty = new Duty(Percent(MaximumDuty)),
+            Step = Number(Step),
+            Deadband = Number(Deadband),
+            ResponseTime = Seconds(ResponseUpSeconds),
         },
 
         _ => _original,
     };
 
+    private void TakeHysteresis(HysteresisDefinition hysteresis)
+    {
+        DeadbandUp = hysteresis.DeadbandUp;
+        DeadbandDown = hysteresis.DeadbandDown;
+        HysteresisUpSeconds = hysteresis.ResponseUp.TotalSeconds;
+        HysteresisDownSeconds = hysteresis.ResponseDown.TotalSeconds;
+    }
+
+    private HysteresisDefinition BuildHysteresis() => new(
+        Number(DeadbandUp),
+        Number(DeadbandDown),
+        Seconds(HysteresisUpSeconds),
+        Seconds(HysteresisDownSeconds));
+
+    /// <summary>
+    /// A box's value, or zero when it is empty.
+    /// </summary>
+    /// <remarks>
+    /// An emptied <c>NumberBox</c> reports NaN, and writing that through would put a threshold at a
+    /// value nothing compares true against — a curve that silently never fires.
+    /// </remarks>
+    private static float Number(double value) => double.IsFinite(value) ? (float)value : 0f;
+
+    /// <summary>The same, held inside a duty's range.</summary>
+    private static float Percent(double value) => ClampDuty(Number(value));
+
+    /// <summary>
+    /// Seconds as a span, treating nonsense as none.
+    /// </summary>
+    /// <remarks>
+    /// An emptied number box reports NaN, and <see cref="TimeSpan.FromSeconds(double)"/> throws on
+    /// it. A hold time of zero is a perfectly good answer; an exception out of a text box is not.
+    /// </remarks>
+    private static TimeSpan Seconds(double value) =>
+        double.IsFinite(value) && value > 0d ? TimeSpan.FromSeconds(value) : TimeSpan.Zero;
+
     private static float ClampDuty(float duty) =>
         Math.Clamp(duty, Duty.MinPercent, Duty.MaxPercent);
+
+    partial void OnSelectedCurveChanged(CurveChoiceViewModel? value) =>
+        SourceCurve = value?.Id ?? CurveId.None;
+
+    partial void OnSelectedControlChanged(ControlChoice? value) =>
+        SourceControl = value?.Id ?? SensorId.None;
 }

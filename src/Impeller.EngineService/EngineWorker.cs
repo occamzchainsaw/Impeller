@@ -130,7 +130,12 @@ public sealed partial class EngineWorker(
             })
             .ToArray();
 
-        notifications.RaiseTick(new TickSnapshot(TickCount, now, sensors, controls));
+        // Already computed to resolve the controls above, and thrown away until now.
+        var curves = result.CurveOutputs
+            .Select(output => new CurveReading(output.Key, output.Value))
+            .ToArray();
+
+        notifications.RaiseTick(new TickSnapshot(TickCount, now, sensors, controls, curves));
     }
 
     /// <summary>

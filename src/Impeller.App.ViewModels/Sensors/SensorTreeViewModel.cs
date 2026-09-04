@@ -31,6 +31,17 @@ public sealed partial class SensorItemViewModel(
     /// <summary>Whether the field is open, so a refresh does not overwrite what is being typed.</summary>
     public bool IsRenaming { get; set; }
 
+    /// <summary>
+    /// Whether this is the row a picker has chosen.
+    /// </summary>
+    /// <remarks>
+    /// Carried on the row rather than compared against the tree's selection in the view, because a
+    /// radio button in a data template has no way to ask "am I the selected one" — which is why the
+    /// picker used to open with nothing checked however long ago the choice had been made.
+    /// </remarks>
+    [ObservableProperty]
+    public partial bool IsSelected { get; set; }
+
     /// <summary>Its hardware and its own name together, for a tooltip and for a flat list.</summary>
     public string FullName { get; } = string.IsNullOrWhiteSpace(descriptor.HardwareName)
         ? descriptor.Name
@@ -209,6 +220,20 @@ public sealed partial class SensorTreeViewModel : ObservableObject
 
     partial void OnSearchChanged(string value) => Rebuild();
 
+    /// <summary>Keeps the rows' own flags agreeing with the one selection.</summary>
+    partial void OnSelectedChanged(SensorItemViewModel? oldValue, SensorItemViewModel? newValue)
+    {
+        if (oldValue is not null)
+        {
+            oldValue.IsSelected = false;
+        }
+
+        if (newValue is not null)
+        {
+            newValue.IsSelected = true;
+        }
+    }
+
     private void Rebuild()
     {
         var previous = Selected?.Id;
@@ -239,6 +264,12 @@ public sealed partial class SensorTreeViewModel : ObservableObject
         // A selection that is still in the tree survives a search; one that has been filtered out
         // is cleared rather than left pointing at a row nobody can see.
         Selected = previous is { } id ? _items.GetValueOrDefault(id) : null;
+
+        // The rows above are new objects, so the flag has to be set on the replacement.
+        if (Selected is { } selected)
+        {
+            selected.IsSelected = true;
+        }
     }
 
     private bool Matches(SensorDescriptor sensor)

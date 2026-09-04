@@ -110,10 +110,17 @@ public partial class App : Application, IDisposable
         Log.Starting(logger, ShellLogging.LogRoot);
 
         // Anything that escapes a handler would otherwise take the window down with nothing said.
-        UnhandledException += (_, e) =>
+        UnhandledException += (_, e) => Fatal(logger, e.Exception);
+
+        // The XAML handler above sees only what reaches the dispatcher. A fault on a background
+        // thread - a timer callback, a continuation off the transport - takes the process down
+        // without passing through it at all.
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
         {
-            Log.Crashed(logger, e.Exception);
-            ShellLogging.Close();
+            if (e.ExceptionObject is Exception fault)
+            {
+                Fatal(logger, fault);
+            }
         };
 
         // Ticks arrive on a transport thread and everything downstream of them is bound to XAML,
@@ -135,29 +142,55 @@ public partial class App : Application, IDisposable
         try
         {
             _window = new MainWindow();
+            MainWindowHandle = WindowNative.GetWindowHandle(_window);
+
+            // The icon outlives the window: closing hides rather than exits, so there is still
+            // something on screen saying the fans are being managed.
+            _tray = new TrayIcon(_window, connection);
+
+            // Reached only on a real exit: the tray handles an ordinary close by hiding the window
+            // and cancelling it, so this runs once, when the user has actually chosen to quit.
+            _window.Closed += (_, _) => Dispose();
+            _window.Activate();
         }
         catch (Exception ex)
         {
-            // A XAML parse failure during window construction does not reliably reach the handler
-            // above: it surfaces as a stowed WinRT exception and the process is gone before Serilog
-            // has flushed. This is the only place that can say what actually happened.
-            Log.Crashed(logger, ex);
-            ShellLogging.Close();
-
-            File.WriteAllText(Path.Combine(ShellLogging.LogRoot, "crash.log"), ex.ToString());
+            // Bringing the window up is the one stretch where a failure does not reliably reach
+            // either handler above: a XAML fault here surfaces as a stowed WinRT exception and the
+            // process is gone before anything has been written.
+            Fatal(logger, ex);
             throw;
         }
+    }
 
-        MainWindowHandle = WindowNative.GetWindowHandle(_window);
+    /// <summary>
+    /// Records a fault that is about to take the process with it.
+    /// </summary>
+    /// <remarks>
+    /// Written straight to a file as well as logged, because the log is buffered and a process that
+    /// is going down does not always get to flush it. A crash nobody can read anything about is one
+    /// nobody can fix — and the shell has had exactly that twice, both times leaving nothing behind
+    /// but a Windows Error Reporting entry naming a system DLL.
+    /// </remarks>
+    private static void Fatal(ILogger logger, Exception exception)
+    {
+        Log.Crashed(logger, exception);
 
-        // The icon outlives the window: closing hides rather than exits, so there is still
-        // something on screen saying the fans are being managed.
-        _tray = new TrayIcon(_window, connection);
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(ShellLogging.LogRoot, "crash.log"),
+                $"{DateTimeOffset.Now:O}{Environment.NewLine}{exception}");
+        }
+        catch (IOException)
+        {
+            // Nothing left to try. The log may still have caught it.
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
 
-        // Reached only on a real exit: the tray handles an ordinary close by hiding the window
-        // and cancelling it, so this runs once, when the user has actually chosen to quit.
-        _window.Closed += (_, _) => Dispose();
-        _window.Activate();
+        ShellLogging.Close();
     }
 
     /// <summary>Releases the tray icon and flushes the log on the way out.</summary>

@@ -261,25 +261,19 @@ public static class ConfigurationValidator
 
         foreach (var binding in configuration.Controls)
         {
-            if (binding.Enabled && binding.CurveId.IsNone)
-            {
-                // A pin is a complete instruction on its own, so a control held by hand with no
-                // curve behind it is a finished state rather than a half-made one. Warning about it
-                // fires on every imported configuration that had a fan set to manual, and a warning
-                // that shows up on correct configurations is one people learn to scroll past.
-                if (binding.ManualDuty is null)
-                {
-                    issues.Add(Warning(
-                        "binding-without-curve",
-                        $"Control {binding.ControlId} is enabled but has no curve assigned."));
-                }
-            }
-            else if (binding.Enabled && !curveIds.Contains(binding.CurveId))
+            var name = Describe(registry, binding.ControlId);
+
+            // An enabled control with no curve is a finished state, not a half-made one. A pin is a
+            // complete instruction on its own, and a control with neither pin nor curve now rests -
+            // handed back to its own firmware, or driven to its failsafe duty. Neither needs
+            // reporting, and this used to report both: on this machine it fired on three fans and
+            // therefore on every single save. A warning that shows up on correct configurations is
+            // one people learn to scroll past, which costs the warnings that matter.
+            if (binding.Enabled && !binding.CurveId.IsNone && !curveIds.Contains(binding.CurveId))
             {
                 issues.Add(Warning(
                     "missing-binding-curve",
-                    $"Control {binding.ControlId} is driven by curve {binding.CurveId}, "
-                    + "which no longer exists."));
+                    $"{name} is driven by a curve that no longer exists."));
             }
 
             if (binding.MinimumDuty > binding.MaximumDuty)
@@ -287,7 +281,7 @@ public static class ConfigurationValidator
                 issues.Add(new ConfigurationIssue(
                     ConfigurationSeverity.Error,
                     "inverted-duty-limits",
-                    $"Control {binding.ControlId} has a minimum duty above its maximum, "
+                    $"{name} has a minimum duty above its maximum, "
                     + "which leaves no duty it is allowed to command."));
             }
 
@@ -295,11 +289,25 @@ public static class ConfigurationValidator
             {
                 issues.Add(Warning(
                     "absent-control",
-                    $"Control {binding.ControlId} is not present on this machine right now. "
+                    $"{name} is not present on this machine right now. "
                     + "Its settings are kept in case it comes back."));
             }
         }
     }
+
+    /// <summary>
+    /// What to call a control in a message a person will read.
+    /// </summary>
+    /// <remarks>
+    /// These strings reach the user now that the shell shows them as notifications rather than
+    /// burying them in a bar nobody reads. "System Fan #3 is driven by a curve that no longer
+    /// exists" is actionable; the same sentence with a GUID in it is not, and the id is in the
+    /// diagnostic bundle for anyone who actually needs it.
+    /// </remarks>
+    private static string Describe(ISensorRegistry? registry, SensorId controlId) =>
+        registry?.GetControl(controlId) is { } control && !string.IsNullOrWhiteSpace(control.Name)
+            ? control.Name
+            : $"Control {controlId}";
 
     private static void CheckOrdering(ImpellerConfiguration configuration, List<ConfigurationIssue> issues)
     {

@@ -8,17 +8,24 @@ using Microsoft.UI.Xaml.Controls;
 namespace Impeller.App.Shell.Pages;
 
 /// <summary>
-/// The curve editor: a list on the left, and whichever editor the selected curve needs on the right.
+/// The curve editor: a list on the left, and whichever panel the selected curve needs on the right.
 /// </summary>
 /// <remarks>
-/// The number boxes are filled from the editor and written back on change rather than two-way bound,
-/// because the whole panel is replaced whenever the selection moves. A two-way binding fires while
-/// that is happening and writes the old curve's numbers into the new one.
+/// <para>
+/// One panel per kind. The shared four-box grid this replaced showed every kind the same four
+/// numbers and let the headers carry the difference, which meant a flat curve — a constant — was
+/// offered a lower and an upper value, a mix curve was offered a temperature range it does not
+/// read, and a trigger's thresholds were called "lower" and "upper" rather than idle and load.
+/// </para>
+/// <para>
+/// The boxes bind two-way straight to the editor. They used to be named controls filled and read
+/// back by hand, because a two-way binding fired while the panel was being replaced and wrote the
+/// old curve's numbers into the new one — which is a real hazard, and the reason the editor is now
+/// replaced wholesale rather than refilled in place.
+/// </para>
 /// </remarks>
 public sealed partial class CurvesPage : Page
 {
-    private bool _loading;
-
     public CurvesPage()
     {
         InitializeComponent();
@@ -38,6 +45,9 @@ public sealed partial class CurvesPage : Page
     /// <summary>The page's view model, pulled from the container because WinUI builds pages itself.</summary>
     public CurvesViewModel ViewModel { get; } = App.GetService<CurvesViewModel>();
 
+    /// <summary>The ways a mix can combine its inputs, for the one combo box that offers them.</summary>
+    public static IReadOnlyList<MixFunctionChoice> MixFunctions => CurveEditorViewModel.MixFunctions;
+
     /// <summary>Shown when nothing is selected.</summary>
     public static Visibility WhenNull(object? value) =>
         value is null ? Visibility.Visible : Visibility.Collapsed;
@@ -46,24 +56,26 @@ public sealed partial class CurvesPage : Page
     public static Visibility WhenNotNull(object? value) =>
         value is null ? Visibility.Collapsed : Visibility.Visible;
 
-    /// <summary>The canvas, for the one kind that has one.</summary>
-    public static Visibility WhenGraph(CurveEditorViewModel? editor) =>
-        editor?.Kind == CurveEditorKind.Graph ? Visibility.Visible : Visibility.Collapsed;
+    /// <summary>Shown when the condition holds.</summary>
+    public static Visibility When(bool condition) =>
+        condition ? Visibility.Visible : Visibility.Collapsed;
 
-    /// <summary>The numbers, for the kinds that are numbers.</summary>
-    public static Visibility WhenNotGraph(CurveEditorViewModel? editor) =>
-        editor is null || editor.Kind == CurveEditorKind.Graph ? Visibility.Collapsed : Visibility.Visible;
+    /// <summary>Shown when it does not.</summary>
+    public static Visibility WhenNot(bool condition) =>
+        condition ? Visibility.Collapsed : Visibility.Visible;
 
-    /// <summary>The sensor picker, for the kinds that read one.</summary>
-    /// <remarks>
-    /// Mix and sync read other curves, and flat reads nothing at all. Offering them a temperature
-    /// would be offering a setting that does nothing.
-    /// </remarks>
-    public static Visibility WhenReadsASensor(CurveEditorViewModel? editor) =>
-        editor?.Kind is CurveEditorKind.Linear or CurveEditorKind.Graph
-            or CurveEditorKind.Trigger or CurveEditorKind.Auto
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+    /// <summary>What kind of curve is open, for the strip above the panel.</summary>
+    public static string KindLabel(CurveEditorViewModel? editor) => editor?.Kind switch
+    {
+        CurveEditorKind.Flat => "Flat curve",
+        CurveEditorKind.Linear => "Linear curve",
+        CurveEditorKind.Graph => "Graph curve",
+        CurveEditorKind.Mix => "Mix curve",
+        CurveEditorKind.Sync => "Sync curve",
+        CurveEditorKind.Trigger => "Trigger curve",
+        CurveEditorKind.Auto => "Auto curve",
+        _ => string.Empty,
+    };
 
     /// <summary>The subtitle under a curve in the list: what it is, and what it drives.</summary>
     public static string DescribeCurve(string kind, int users) => users switch
@@ -80,62 +92,8 @@ public sealed partial class CurvesPage : Page
     {
         if (e.PropertyName == nameof(CurvesViewModel.Editor))
         {
-            Fill(ViewModel.Editor);
+            Canvas.Editor = ViewModel.Editor;
         }
-    }
-
-    /// <summary>
-    /// Loads the editor's values into the controls.
-    /// </summary>
-    /// <remarks>
-    /// The flag is what stops the assignments below being read back as user edits, which would mark
-    /// a freshly opened curve unsaved before anyone had touched it.
-    /// </remarks>
-    private void Fill(CurveEditorViewModel? editor)
-    {
-        _loading = true;
-
-        try
-        {
-            Canvas.Editor = editor;
-
-            if (editor is null)
-            {
-                return;
-            }
-
-            NameBox.Text = editor.Name;
-            LowInputBox.Value = editor.LowInput;
-            HighInputBox.Value = editor.HighInput;
-            MinimumDutyBox.Value = editor.MinimumDuty;
-            MaximumDutyBox.Value = editor.MaximumDuty;
-        }
-        finally
-        {
-            _loading = false;
-        }
-    }
-
-    /// <summary>Writes the controls back into the editor and marks the curve unsaved.</summary>
-    private void OnEdited(object sender, object args)
-    {
-        if (_loading || ViewModel.Editor is not { } editor)
-        {
-            return;
-        }
-
-        editor.Name = NameBox.Text;
-        editor.LowInput = Sane(LowInputBox.Value, editor.LowInput);
-        editor.HighInput = Sane(HighInputBox.Value, editor.HighInput);
-        editor.MinimumDuty = Sane(MinimumDutyBox.Value, editor.MinimumDuty);
-        editor.MaximumDuty = Sane(MaximumDutyBox.Value, editor.MaximumDuty);
-
-        if (ViewModel.Selected is { } selected)
-        {
-            selected.Name = editor.Name;
-        }
-
-        ViewModel.IsDirty = true;
     }
 
     /// <summary>Records which sensor the curve should read.</summary>
@@ -143,20 +101,9 @@ public sealed partial class CurvesPage : Page
     {
         if (sender is RadioButton { DataContext: SensorItemViewModel sensor })
         {
-            ViewModel.SensorPicker.Selected = sensor;
-            ViewModel.IsDirty = true;
+            ViewModel.ChooseSensor(sensor);
         }
     }
-
-    /// <summary>
-    /// A number box's value, or the one it had.
-    /// </summary>
-    /// <remarks>
-    /// An emptied box reports NaN, and writing that through would put a curve's threshold at a
-    /// value nothing compares true against — a curve that silently never fires.
-    /// </remarks>
-    private static float Sane(double value, float fallback) =>
-        double.IsNaN(value) ? fallback : (float)value;
 
     private void OnAddGraph(object sender, RoutedEventArgs e) => Add(CurveEditorKind.Graph);
 
