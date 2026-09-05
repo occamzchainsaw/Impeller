@@ -296,9 +296,19 @@ public interface IEngineControl
     /// <param name="name">What to save it as, or null to use the file's own name.</param>
     /// <param name="cancellationToken">Cancels the request.</param>
     /// <remarks>
+    /// <para>
     /// Saved but not applied. The engine keeps running whatever it was running, and the user loads
     /// the import once they have read the notes — which is the whole reason the notes exist, and
     /// would be pointless if the fans had already changed behaviour by the time they saw them.
+    /// </para>
+    /// <para>
+    /// One thing does land immediately, and it is worth saying because "not applied" reads wider
+    /// than it means: the names the file carries are seeded into this machine's names right away.
+    /// Names are keyed by sensor rather than by configuration — that is what makes a rename survive
+    /// a configuration switch — so there is no such thing as applying them along with a particular
+    /// configuration. Seeding never overwrites a name already set here, and it changes labels only.
+    /// No fan changes speed, which is what this remark is about.
+    /// </para>
     /// </remarks>
     Task<ImportSummary> ImportConfigurationAsync(
         string path,
