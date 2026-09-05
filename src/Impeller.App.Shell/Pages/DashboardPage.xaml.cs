@@ -29,12 +29,6 @@ public sealed partial class DashboardPage : Page
     public static string SensorSummary(int count) =>
         count == 1 ? "1 sensor" : $"{count} sensors";
 
-    /// <summary>Whether a card has something to say, for the one bar that is still a card's own.</summary>
-    public static bool HasText(string? text) => !string.IsNullOrWhiteSpace(text);
-
-    /// <summary>Inverts a flag, which x:Bind cannot do on its own.</summary>
-    public static bool Not(bool value) => !value;
-
     /// <summary>Shown when the condition holds.</summary>
     public static Visibility When(bool condition) =>
         condition ? Visibility.Visible : Visibility.Collapsed;
@@ -115,6 +109,38 @@ public sealed partial class DashboardPage : Page
         if (sender is TextBox { Tag: ControlCardViewModel card })
         {
             await card.RenameCommand.ExecuteAsync(null);
+        }
+    }
+
+    /// <summary>
+    /// Asks before taking a fan off the page, because its settings go with it.
+    /// </summary>
+    /// <remarks>
+    /// The default button is Cancel. A confirmation whose destructive answer is one Enter away is a
+    /// confirmation that trains people to press Enter.
+    /// </remarks>
+    private async void OnRemoveFan(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: ControlCardViewModel card })
+        {
+            return;
+        }
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = $"Remove {card.Name}?",
+            Content = "Its curve, its limits and anything calibration measured for it are removed "
+                + "with it, and the fan goes back to the board's own control. You can add it again "
+                + "at any time, but it will come back with none of that.",
+            PrimaryButtonText = "Remove",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+        };
+
+        if (await Dialogs.ShowAsync(dialog) == ContentDialogResult.Primary)
+        {
+            await card.RemoveCommand.ExecuteAsync(null);
         }
     }
 

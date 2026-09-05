@@ -119,12 +119,47 @@
                                         Text="{x:Bind EditableName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                         ToolTipService.ToolTip="{x:Bind local:DashboardPage.Where(ProviderName, HardwareName, HardwarePath), Mode=OneWay}" />
 
-                                    <Button
+                                    <!--
+                                        A warning glyph rather than an InfoBar, and the reason is
+                                        the layout: UniformGridLayout gives every card the height of
+                                        the first one it measures, so anything that appears inside a
+                                        card and makes it taller is simply cut off. An InfoBar here
+                                        showed as ten pixels of coloured edge with the message
+                                        invisible below it. Every card is now the same height by
+                                        construction, and the two things that used to open a bar say
+                                        what they have to say elsewhere: this in a tooltip, and a
+                                        failed click in the notification centre, which is where the
+                                        rest of the app already reports its failures.
+                                    -->
+                                    <StackPanel
                                         Grid.Column="1"
-                                        Command="{x:Bind IdentifyCommand}"
-                                        Content="Identify"
-                                        IsEnabled="{x:Bind IsPresent}"
-                                        ToolTipService.ToolTip="Spin this fan up for five seconds" />
+                                        VerticalAlignment="Center"
+                                        Orientation="Horizontal"
+                                        Spacing="6">
+                                        <FontIcon
+                                            AutomationProperties.Name="The engine cannot see this fan"
+                                            FontSize="15"
+                                            Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                            Glyph="&#xE7BA;"
+                                            ToolTipService.ToolTip="This fan is in the configuration but the engine cannot see it. Its settings are kept."
+                                            Visibility="{x:Bind local:DashboardPage.WhenNot(IsPresent)}" />
+
+                                        <Button
+                                            Command="{x:Bind IdentifyCommand}"
+                                            Content="Identify"
+                                            IsEnabled="{x:Bind IsPresent}"
+                                            ToolTipService.ToolTip="Spin this fan up for five seconds" />
+
+                                        <!--  Named, because a button whose only content is a glyph announces nothing.  -->
+                                        <Button
+                                            Padding="8,5,8,5"
+                                            AutomationProperties.Name="Remove this fan"
+                                            Click="OnRemoveFan"
+                                            Tag="{x:Bind}"
+                                            ToolTipService.ToolTip="Take this fan off the page">
+                                            <FontIcon FontSize="14" Glyph="&#xE74D;" />
+                                        </Button>
+                                    </StackPanel>
                                 </Grid>
 
                                 <!--  The two numbers, and who is deciding them.  -->
@@ -204,18 +239,6 @@
                                         Text="{x:Bind local:DashboardPage.Percent(PinDuty), Mode=OneWay}"
                                         TextAlignment="Right" />
                                 </Grid>
-
-                                <InfoBar
-                                    IsClosable="True"
-                                    IsOpen="{x:Bind local:DashboardPage.HasText(Problem), Mode=OneWay}"
-                                    Message="{x:Bind Problem, Mode=OneWay}"
-                                    Severity="Warning" />
-
-                                <InfoBar
-                                    IsClosable="False"
-                                    IsOpen="{x:Bind local:DashboardPage.Not(IsPresent)}"
-                                    Message="This fan is in the configuration but the engine cannot see it. Its settings are kept."
-                                    Severity="Warning" />
                             </StackPanel>
                         </Border>
                     </DataTemplate>

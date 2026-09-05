@@ -1,6 +1,8 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+﻿using System.Collections.ObjectModel;
+using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Impeller.App.ViewModels.Engine;
+using Impeller.App.ViewModels.Notifications;
 using Impeller.Core.Abstractions;
 using Impeller.Core.Abstractions.Configuration;
 using Impeller.Ipc.Contracts;
@@ -40,7 +42,9 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
     private static readonly Duty IdentifyDuty = new(100f);
 
     private readonly EngineConnection _connection;
+    private readonly NotificationCenter _notify;
     private readonly Func<ControlBindingDefinition, Task> _save;
+    private readonly Func<SensorId, Task> _remove;
     private readonly Func<string?, string?> _nameClaimant;
     private readonly ThrottledWriter<Duty> _writer;
 
@@ -53,16 +57,22 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
         ControlBindingDefinition binding,
         IEnumerable<CurveChoice> curves,
         EngineConnection connection,
+        NotificationCenter notify,
         Func<ControlBindingDefinition, Task> save,
+        Func<SensorId, Task> remove,
         Func<string?, string?> nameClaimant)
     {
         ArgumentNullException.ThrowIfNull(binding);
         ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(notify);
         ArgumentNullException.ThrowIfNull(save);
+        ArgumentNullException.ThrowIfNull(remove);
         ArgumentNullException.ThrowIfNull(nameClaimant);
 
         _connection = connection;
+        _notify = notify;
         _save = save;
+        _remove = remove;
         _nameClaimant = nameClaimant;
         _binding = binding;
         _writer = new ThrottledWriter<Duty>(TimeProvider.System, WriteInterval, SendDutyAsync);
@@ -129,8 +139,20 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
     /// <summary>The tacho paired with it, or none.</summary>
     public SensorId PairedFanSensorId => _binding.PairedFanSensorId;
 
-    /// <summary>The curves this fan can be pointed at, including "not driven".</summary>
-    public IReadOnlyList<CurveChoice> Curves { get; private set; } = [];
+    /// <summary>
+    /// The curves this fan can be pointed at, including "not driven".
+    /// </summary>
+    /// <remarks>
+    /// One collection for the life of the card, updated in place, and that is the whole of the fix
+    /// for every picker on the page going blank at once. It used to be a fresh list built on every
+    /// rebind — which is every time anything at all is saved, including the save that a picker's
+    /// own selection causes — and replacing a <c>ComboBox</c>'s <c>ItemsSource</c> makes it clear
+    /// its <c>SelectedItem</c>. That clear arrives back through the two-way binding as a null, so
+    /// choosing a curve on one card blanked the picker on every card, while the lists behind them
+    /// stayed perfectly correct: open one and the curves were all still there, with none of them
+    /// marked as chosen.
+    /// </remarks>
+    public ObservableCollection<CurveChoice> Curves { get; } = [];
 
     /// <summary>
     /// Which one it is pointed at now.
@@ -220,10 +242,6 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
     [ObservableProperty]
     public partial bool IsBusy { get; private set; }
 
-    /// <summary>The last thing that went wrong, or null.</summary>
-    [ObservableProperty]
-    public partial string? Problem { get; private set; }
-
     /// <summary>How many calibration points this fan has, so the card can offer to measure it.</summary>
     public int CalibrationPoints => _binding.Calibration.Count;
 
@@ -259,7 +277,7 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
         }
 
         _binding = binding;
-        Curves = [.. curves];
+        SyncCurves(curves);
         ModeOffLabel = binding.CurveId.IsNone ? "Off" : "Curve";
 
         // The engine's own rule, and nothing more. This used to require a curve as well, which is
@@ -279,7 +297,6 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
             _suppressWrite = false;
         }
 
-        OnPropertyChanged(nameof(Curves));
         OnPropertyChanged(nameof(CalibrationPoints));
         OnPropertyChanged(nameof(IsCalibrated));
         OnPropertyChanged(nameof(ThresholdText));
@@ -403,31 +420,27 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
             await SendAsync(engine => engine.ReleaseControlAsync(Id)).ConfigureAwait(true);
 
             // The stored pin goes with the claim. Keeping it would have the fan seize itself again
-            // the next time this binding was enabled, overriding the curve it was just given.
-            if (_binding.ManualDuty is not null || _binding.CurveId.IsNone)
+            // the next time this configuration was loaded, overriding whatever else it now says.
+            if (_binding.ManualDuty is not null)
             {
-                await _save(_binding with
-                {
-                    ManualDuty = null,
-                    Enabled = !_binding.CurveId.IsNone,
-                }).ConfigureAwait(true);
+                await _save(_binding with { ManualDuty = null }).ConfigureAwait(true);
             }
 
             return;
         }
 
-        // Applied and awaited before the claim, because the engine refuses a claim on a control it
-        // is not driving and the claim below would otherwise race the configuration reaching it.
-        if (!_binding.Enabled)
-        {
-            await _save(_binding with { Enabled = true }).ConfigureAwait(true);
-        }
-
+        // Nothing to switch on first. Taking a fan by hand used to save the binding as enabled
+        // before claiming it, because the engine refused a claim on a fan it was not driving; the
+        // engine no longer does, so a click on the mode switch no longer edits the configuration
+        // as a side effect and "Not driven" no longer flips to "Curve" on its own.
         await SendAsync(async engine =>
         {
             var outcome = await engine.SetManualDutyAsync(Id, new Duty(PinDuty)).ConfigureAwait(true);
 
-            Problem = outcome.Granted ? null : $"Could not take this fan: {Describe(outcome)}";
+            if (!outcome.Granted)
+            {
+                _notify.Error($"{Name} could not be taken by hand.", Describe(outcome));
+            }
         }).ConfigureAwait(true);
     }
 
@@ -447,7 +460,10 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
                 .IdentifyControlAsync(Id, IdentifyDuty, IdentifyDuration)
                 .ConfigureAwait(true);
 
-            Problem = outcome.Granted ? null : $"Could not spin this fan up: {Describe(outcome)}";
+            if (!outcome.Granted)
+            {
+                _notify.Error($"{Name} could not be spun up.", Describe(outcome));
+            }
         }).ConfigureAwait(true);
     }
 
@@ -462,17 +478,31 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
     /// </remarks>
     partial void OnSelectedCurveChanged(CurveChoice? value)
     {
-        // Two ways this fires without anyone having chosen anything. A null is the picker clearing
-        // itself while its items are being replaced. And the write-back from a replaced ItemsSource
-        // arrives through a dependency-property callback, which lands after the flag below has been
-        // put down again - so the flag alone is not enough, and the honest test is whether the
-        // choice actually differs from what the fan is already set to.
-        if (_suppressCurve || value is not { } choice || choice.Id == _binding.CurveId)
+        if (_suppressCurve)
         {
             return;
         }
 
-        _ = _save(_binding with { CurveId = choice.Id, Enabled = !choice.Id.IsNone || IsPinned });
+        // A null is never a choice: "Not driven" is an entry in the list rather than the absence of
+        // one, so nothing a person can click produces this. What produces it is the picker clearing
+        // itself when its items are touched, and the write-back arrives through a dependency
+        // property callback that lands after the flag above has been put down again - so the flag
+        // alone was never enough. Putting the fan's own curve straight back is what stops a card
+        // sitting there showing nothing at all.
+        if (value is not { } choice)
+        {
+            _suppressCurve = true;
+            SelectedCurve = Curves.FirstOrDefault(curve => curve.Id == _binding.CurveId, CurveChoice.None);
+            _suppressCurve = false;
+            return;
+        }
+
+        if (choice.Id == _binding.CurveId)
+        {
+            return;
+        }
+
+        _ = _save(_binding with { CurveId = choice.Id, Enabled = !choice.Id.IsNone });
     }
 
     /// <summary>
@@ -493,6 +523,48 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
         _writer.Write(new Duty(value));
     }
 
+    /// <summary>
+    /// Takes this fan off the page.
+    /// </summary>
+    /// <remarks>
+    /// Adding a fan had no opposite, so a header brought onto the page to find out what it drove
+    /// stayed there for good. The binding goes, and its curve, limits and calibration with it, so
+    /// the page asks first — and the engine hands the fan back to the board on the way out rather
+    /// than leaving it at whatever duty it was last given.
+    /// </remarks>
+    [RelayCommand]
+    private Task RemoveAsync() => _remove(Id);
+
+    /// <summary>
+    /// Brings the picker's list to match, touching only the entries that actually moved.
+    /// </summary>
+    /// <remarks>
+    /// Not clear-and-refill: clearing is what takes the selection with it. Every save rebinds every
+    /// card, and the list is identical almost every time, so the common case has to disturb the
+    /// picker not at all.
+    /// </remarks>
+    private void SyncCurves(IEnumerable<CurveChoice> curves)
+    {
+        var wanted = curves as IList<CurveChoice> ?? [.. curves];
+
+        for (var index = Curves.Count - 1; index >= wanted.Count; index--)
+        {
+            Curves.RemoveAt(index);
+        }
+
+        for (var index = 0; index < wanted.Count; index++)
+        {
+            if (index >= Curves.Count)
+            {
+                Curves.Add(wanted[index]);
+            }
+            else if (!Curves[index].Equals(wanted[index]))
+            {
+                Curves[index] = wanted[index];
+            }
+        }
+    }
+
     private async Task SendDutyAsync(Duty duty, CancellationToken cancellationToken)
     {
         if (_connection.Engine is { } engine)
@@ -505,7 +577,7 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
     {
         if (_connection.Engine is not { } engine)
         {
-            Problem = "Not connected to the engine.";
+            _notify.Error("Not connected to the engine.", $"{Name} was not changed.");
             return;
         }
 
@@ -519,7 +591,7 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
         {
             // The connection dropping mid-click is ordinary, and the reconnect loop is already on
             // it. What must not happen is the click disappearing without a word.
-            Problem = ex.Message;
+            _notify.Error($"{Name} did not change.", ex);
         }
         finally
         {

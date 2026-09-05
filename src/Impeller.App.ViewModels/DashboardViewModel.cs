@@ -160,8 +160,8 @@ public sealed partial class DashboardViewModel(EngineConnection connection, Noti
     /// </summary>
     /// <remarks>
     /// Deliberately without a curve, so adding a fan never starts writing to it. It appears as a
-    /// card saying it is not driven, and picking a curve is the deliberate second step that starts
-    /// it — which is the same step that makes it eligible for a plugin.
+    /// card saying it is not driven, and picking a curve — or taking it by hand, or granting it to
+    /// a plugin — is the deliberate second step that starts it.
     /// </remarks>
     [RelayCommand]
     private async Task AddFanAsync(AvailableFan fan)
@@ -259,7 +259,9 @@ public sealed partial class DashboardViewModel(EngineConnection connection, Noti
                 binding,
                 Curves,
                 Connection,
+                Notify,
                 SaveAsync,
+                RemoveFanAsync,
                 NameClaimant);
 
             _cards[binding.ControlId] = card;
@@ -298,7 +300,7 @@ public sealed partial class DashboardViewModel(EngineConnection connection, Noti
     /// </remarks>
     private async Task SaveAsync(ControlBindingDefinition binding)
     {
-        if (Connection.Engine is not { } engine || Snapshot is not { } snapshot)
+        if (Snapshot is not { } snapshot)
         {
             Notify.Error("Not connected to the engine.", "The change was not saved.");
             return;
@@ -316,7 +318,46 @@ public sealed partial class DashboardViewModel(EngineConnection connection, Noti
             controls[index] = binding;
         }
 
-        var configuration = snapshot.Configuration with { Controls = [.. controls] };
+        await ApplyAsync(snapshot.Configuration with { Controls = [.. controls] }).ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// Takes a fan out of the configuration.
+    /// </summary>
+    /// <remarks>
+    /// The opposite of <see cref="AddFanAsync"/>, which had none: a header added to see what it
+    /// drove could be renamed, curved, calibrated and pinned, but never taken off the page again.
+    /// The engine hands the fan back to the board as the binding leaves, so removing a card does
+    /// not leave a fan stuck at whatever duty it was last given.
+    /// </remarks>
+    private async Task RemoveFanAsync(SensorId controlId)
+    {
+        if (Snapshot is not { } snapshot)
+        {
+            Notify.Error("Not connected to the engine.", "The fan was not removed.");
+            return;
+        }
+
+        var controls = snapshot.Configuration.Controls
+            .Where(control => control.ControlId != controlId)
+            .ToArray();
+
+        if (controls.Length == snapshot.Configuration.Controls.Count)
+        {
+            return;
+        }
+
+        await ApplyAsync(snapshot.Configuration with { Controls = [.. controls] }).ConfigureAwait(true);
+    }
+
+    /// <summary>Sends a whole configuration and reports only what went wrong.</summary>
+    private async Task ApplyAsync(ImpellerConfiguration configuration)
+    {
+        if (Connection.Engine is not { } engine)
+        {
+            Notify.Error("Not connected to the engine.", "The change was not saved.");
+            return;
+        }
 
         try
         {
