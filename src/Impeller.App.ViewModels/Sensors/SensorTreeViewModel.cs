@@ -512,9 +512,16 @@ public sealed partial class SensorTreeViewModel : ObservableObject
             return false;
         }
 
-        // The hardware name is searched too, so typing "nuvoton" still finds the motherboard's
-        // sensors now that it is no longer glued onto the front of every one of their names.
+        // The display name first, because it is the one on the row in front of the user. Rename a
+        // fan to "Seat blower" and searching for "blower" has to find it - otherwise the app offers
+        // to let you name things and then refuses to look them up by the name you gave.
+        //
+        // The provider's own name stays searchable beside it, so a rename does not hide a sensor
+        // from someone who only knows what the hardware calls it. The hardware name is searched too,
+        // so typing "nuvoton" still finds the motherboard's sensors now that it is no longer glued
+        // onto the front of every one of their names.
         return string.IsNullOrWhiteSpace(Search)
+            || sensor.DisplayName.Contains(Search, StringComparison.OrdinalIgnoreCase)
             || sensor.Name.Contains(Search, StringComparison.OrdinalIgnoreCase)
             || sensor.HardwareName.Contains(Search, StringComparison.OrdinalIgnoreCase)
             || sensor.HardwarePath.Contains(Search, StringComparison.OrdinalIgnoreCase);

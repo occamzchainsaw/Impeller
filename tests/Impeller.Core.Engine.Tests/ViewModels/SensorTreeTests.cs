@@ -152,6 +152,42 @@ public class SensorTreeTests
     }
 
     [Fact]
+    public void A_renamed_sensor_is_found_by_the_name_the_user_gave_it()
+    {
+        // The row shows the user's name, so the search has to accept it. Without this, renaming a
+        // fan makes it unfindable by the only name its owner now knows it by - and the row is still
+        // sitting there, under a search box that says it is not.
+        var machine = Machine();
+        machine[1] = machine[1] with { DisplayName = "Seat blower" };
+
+        var tree = new SensorTreeViewModel { IncludeControls = true };
+        tree.Load(machine);
+
+        tree.Search = "blower";
+
+        var found = tree.Groups.SelectMany(group => group.Sensors).ToList();
+
+        Assert.Single(found);
+        Assert.Equal("Seat blower", found[0].Name);
+    }
+
+    [Fact]
+    public void A_renamed_sensor_is_still_found_by_what_the_hardware_calls_it()
+    {
+        // The other direction, and the reason the provider name stays in the search: someone
+        // reading a manual, or a forum post, knows it as Fan #4 whatever it has been renamed to.
+        var machine = Machine();
+        machine[1] = machine[1] with { DisplayName = "Seat blower" };
+
+        var tree = new SensorTreeViewModel { IncludeControls = true };
+        tree.Load(machine);
+
+        tree.Search = "Fan #4";
+
+        Assert.Single(tree.Groups.SelectMany(group => group.Sensors));
+    }
+
+    [Fact]
     public void A_selection_survives_a_search_that_still_contains_it()
     {
         var tree = Loaded();
