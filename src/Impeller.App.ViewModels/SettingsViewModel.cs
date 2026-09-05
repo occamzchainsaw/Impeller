@@ -21,6 +21,7 @@ namespace Impeller.App.ViewModels;
 public sealed partial class SettingsViewModel : EnginePageViewModel
 {
     private bool _disposed;
+    private bool _readingAutostart;
 
     public SettingsViewModel(EngineConnection connection, NotificationCenter notifications)
         : base(connection, notifications) => Tuning = new TuningViewModel(connection);
@@ -62,6 +63,18 @@ public sealed partial class SettingsViewModel : EnginePageViewModel
     public partial bool IsBusy { get; private set; }
 
     /// <summary>
+    /// Whether the window comes back when the user logs in.
+    /// </summary>
+    /// <remarks>
+    /// About the window and its tray icon, and nothing else. The engine is a service and starts
+    /// with the machine whether or not anybody logs in, which is the point of it being one — the
+    /// fans on a machine sitting at the login screen still need managing. Switching this off costs
+    /// nothing but the tray icon.
+    /// </remarks>
+    [ObservableProperty]
+    public partial bool StartsWithWindows { get; set; }
+
+    /// <summary>
     /// Asks the user for a FanControl configuration file.
     /// </summary>
     /// <remarks>
@@ -74,6 +87,63 @@ public sealed partial class SettingsViewModel : EnginePageViewModel
 
     /// <summary>Puts the diagnostic bundle on the clipboard. Supplied by the shell.</summary>
     public Action<string>? CopyToClipboard { get; set; }
+
+    /// <summary>Reads whether the shell is registered to start with Windows. Supplied by the shell.</summary>
+    /// <remarks>
+    /// Delegates for the same reason the file picker is one: this project targets no platform, and
+    /// the answer lives in the Windows registry. Absent, the section reports off and does nothing,
+    /// which is the honest reading on a machine where it cannot be set.
+    /// </remarks>
+    public Func<bool>? ReadAutostart { get; set; }
+
+    /// <summary>Registers or unregisters it. Supplied by the shell.</summary>
+    public Func<bool, bool>? WriteAutostart { get; set; }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The autostart flag is read here rather than in the constructor: the page wires its delegates
+    /// after building the view model, so a constructor would ask before there was anything to ask.
+    /// </remarks>
+    public override async Task LoadAsync(CancellationToken cancellationToken = default)
+    {
+        await base.LoadAsync(cancellationToken).ConfigureAwait(true);
+
+        // Assigned through the flag, because the setter is what writes to the registry and reading
+        // the current state must not count as changing it.
+        _readingAutostart = true;
+        StartsWithWindows = ReadAutostart?.Invoke() ?? false;
+        _readingAutostart = false;
+    }
+
+    /// <summary>
+    /// Registers or unregisters the shell, and tells the truth if it could not.
+    /// </summary>
+    /// <remarks>
+    /// A toggle that silently springs back is worse than one that is missing, so a refusal - a
+    /// policy-managed registry, most likely - is announced and the switch is put back where it was
+    /// rather than left showing a state that is not real.
+    /// </remarks>
+    partial void OnStartsWithWindowsChanged(bool value)
+    {
+        if (_readingAutostart || WriteAutostart is not { } write)
+        {
+            return;
+        }
+
+        if (write(value))
+        {
+            return;
+        }
+
+        Notify.Error(
+            "Windows would not save that.",
+            "Impeller could not change whether it starts with Windows. You can set it by hand in "
+                + "Task Manager, on the Startup apps tab.");
+
+        _readingAutostart = true;
+        StartsWithWindows = !value;
+        _readingAutostart = false;
+    }
 
     /// <inheritdoc />
     protected override void OnSnapshot(EngineSnapshot snapshot)

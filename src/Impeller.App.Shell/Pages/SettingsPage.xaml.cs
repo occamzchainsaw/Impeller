@@ -1,4 +1,5 @@
 using Impeller.App.ViewModels;
+using Impeller.Platform.Windows;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Windows.ApplicationModel.DataTransfer;
@@ -20,14 +21,26 @@ public sealed partial class SettingsPage : Page
     {
         InitializeComponent();
 
-        // Two things the view models cannot do for themselves without a UI framework: a file picker
-        // needs a window handle, and the clipboard is a shell service.
+        // Things the view models cannot do for themselves without a UI framework or a platform: a
+        // file picker needs a window handle, the clipboard is a shell service, and autostart is a
+        // registry value on a project that targets no operating system.
         ViewModel.PickLegacyFile = PickLegacyFileAsync;
         ViewModel.CopyToClipboard = Copy;
+        ViewModel.ReadAutostart = () => StartupRegistration.IsEnabled(AutostartName);
+        ViewModel.WriteAutostart = enabled => StartupRegistration.Set(AutostartName, enabled);
 
         Loaded += async (_, _) => await ViewModel.LoadAsync().ConfigureAwait(true);
         Unloaded += (_, _) => ViewModel.Dispose();
     }
+
+    /// <summary>
+    /// What the Run value is called, and therefore what Task Manager's Startup tab shows.
+    /// </summary>
+    /// <remarks>
+    /// The product name rather than the executable's, because this is a label a person reads in a
+    /// list of programs they may not remember installing.
+    /// </remarks>
+    private const string AutostartName = "Impeller";
 
     /// <summary>The page's view model, pulled from the container because WinUI builds pages itself.</summary>
     public SettingsViewModel ViewModel { get; } = App.GetService<SettingsViewModel>();

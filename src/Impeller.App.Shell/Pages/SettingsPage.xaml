@@ -184,6 +184,37 @@
                 </StackPanel>
             </Expander>
 
+            <!--  Starting with Windows, which is about the window and not about the fans.  -->
+            <Expander
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Stretch"
+                Header="Starting with Windows">
+                <StackPanel Spacing="12">
+                    <!--
+                        Says what it does not do as well as what it does. The obvious reading of a
+                        "start with Windows" switch on a fan controller is that the fans stop being
+                        managed without it, which would make switching it off frightening and is
+                        the opposite of true.
+                    -->
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="Your fans are managed by the Impeller engine, which is a Windows service: it starts with the machine and keeps running whether this window is open or not, and whether anyone is logged in or not. This setting only decides whether the window and its tray icon come back when you log in."
+                        TextWrapping="Wrap" />
+
+                    <ToggleSwitch
+                        Header="Open Impeller when I log in"
+                        IsOn="{x:Bind ViewModel.StartsWithWindows, Mode=TwoWay}"
+                        OffContent="No"
+                        OnContent="Yes" />
+
+                    <TextBlock
+                        FontSize="12"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="Listed in Task Manager under Startup apps, where you can also switch it off."
+                        TextWrapping="Wrap" />
+                </StackPanel>
+            </Expander>
+
             <!--  The document that goes on a bug report.  -->
             <Expander
                 HorizontalAlignment="Stretch"
