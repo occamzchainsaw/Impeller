@@ -103,15 +103,24 @@ public sealed class ControlLoop
         ArgumentNullException.ThrowIfNull(curves);
         ArgumentNullException.ThrowIfNull(bindings);
 
-        // A control that was resting may now have a curve, and one that had a curve may not. The
-        // handover happens once per rest, so the record of it has to go when the rules change.
-        _resting.Clear();
-
         var previous = _bindings;
 
         // Bindings first: the sort needs to know which curve drives which control before it can
         // follow a sync curve's control edge back to the curve behind it.
         var bound = bindings.ToDictionary(binding => binding.ControlId);
+
+        // A control that was resting may now have a curve, and one that had a curve may not, so
+        // the record of a rest goes when the rules behind that rest change - and only then. This
+        // used to clear the lot, which was free while resting happened once, on a transition. The
+        // tick loop rests every switched-off fan now, and this runs on every save, which while a
+        // slider is moving is four times a second: clearing it wholesale would re-write every fan
+        // the user had switched off, several times a second, for as long as they dragged.
+        _resting.RemoveWhere(controlId =>
+            !bound.TryGetValue(controlId, out var now)
+            || !previous.TryGetValue(controlId, out var was)
+            || now.Enabled != was.Enabled
+            || now.CurveId != was.CurveId
+            || now.FailsafeDuty != was.FailsafeDuty);
         var controlCurves = bound.ToDictionary(entry => entry.Key, entry => entry.Value.CurveId);
 
         var order = CurveGraph.Sort(curves, controlCurves);
@@ -132,20 +141,26 @@ public sealed class ControlLoop
     }
 
     /// <summary>
-    /// Hands back any control this configuration has stopped driving.
+    /// Hands back any control this configuration has stopped driving, or dropped altogether.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Switching a fan off in Impeller used to leave it at whatever duty was last written to it,
-    /// for as long as the machine stayed on. The tick loop skips a disabled binding before it
-    /// reaches the resting logic — correctly, because "disabled" has to mean the engine does not
-    /// touch this control — so nothing ever moved the fan again. A user who pinned a fan at 20 %
-    /// and then switched it off got a fan permanently at 20 %, and no reason to look.
+    /// Switching a fan off in Impeller, or taking it off the page, used to leave it at whatever
+    /// duty was last written to it for as long as the machine stayed on. Nothing walks a control
+    /// the configuration no longer drives, so nothing ever moved the fan again: a user who pinned
+    /// one at 20 % and then switched it off got a fan permanently at 20 %, and no reason to look.
     /// </para>
     /// <para>
-    /// So the handover happens on the way out, once, while the engine still considers the control
-    /// its own. This is the same hazard the resting state fixed for a curveless fan; disabling one
-    /// was the last way left to reach it.
+    /// So the handover happens on the way out, once, while the engine still remembers what the
+    /// control's binding said. This is the same hazard the resting state fixed for a curveless
+    /// fan; these two were the last ways left to reach it.
+    /// </para>
+    /// <para>
+    /// The test is whether the engine ever commanded the control, not whether its binding was
+    /// switched on. Those were the same thing until a claimant could hold a switched-off fan, and
+    /// the difference is a fan a plugin was driving when the user removed it — which needs the
+    /// handover exactly as much, and which the old test skipped. A control the engine has never
+    /// written to is left alone, because handing back a fan nobody took is still a write.
     /// </para>
     /// <para>
     /// A write that fails here is not reported: the tick loop will never look at this control
@@ -159,8 +174,8 @@ public sealed class ControlLoop
 
         foreach (var (controlId, was) in previous)
         {
-            if (!was.Enabled
-                || (_bindings.TryGetValue(controlId, out var now) && now.Enabled)
+            if ((_bindings.TryGetValue(controlId, out var now) && now.Enabled)
+                || !_commandedDuties.ContainsKey(controlId)
                 || _registry.GetControl(controlId) is not { } control)
             {
                 continue;
@@ -177,10 +192,10 @@ public sealed class ControlLoop
     /// <remarks>
     /// <para>
     /// Claimability is checked when a claim is taken, but the configuration can change under a
-    /// standing claim at any time afterwards - someone disables the fan, or unassigns its curve.
-    /// Without this the claim survives into a configuration that cannot honour it: the tick loop
-    /// skips a disabled binding, so the holder goes on setting duties that are accepted and then
-    /// silently discarded, while its own display shows a fan speed nobody is commanding.
+    /// standing claim at any time afterwards - someone takes the fan off the page. Without this the
+    /// claim survives into a configuration that cannot honour it: the tick loop only walks the
+    /// bindings it has, so the holder goes on setting duties that are accepted and then silently
+    /// discarded, while its own display shows a fan speed nobody is commanding.
     /// </para>
     /// <para>
     /// The claimant is told, through the ownership event, with
@@ -194,8 +209,7 @@ public sealed class ControlLoop
         {
             var stillAllowed = owner.Kind switch
             {
-                ControlOwnerKind.Plugin => CanBeHeldByPlugin(controlId),
-                ControlOwnerKind.ManualOverride => IsDriven(controlId),
+                ControlOwnerKind.Plugin or ControlOwnerKind.ManualOverride => CanBeClaimed(controlId),
 
                 // A failsafe claim outranks the configuration entirely. Freeing a fan the engine is
                 // holding because it lost its grip would be the one change that makes things worse.
@@ -223,10 +237,10 @@ public sealed class ControlLoop
         {
             var owner = _ownership.GetOwner(binding.ControlId);
 
-            // A stored pin on a disabled control is kept in the configuration but not taken: the
-            // tick loop would not write it, and a claim nothing honours is worse than no claim.
-            // Re-enabling the control restores the pin on the next apply.
-            if (binding.ManualDuty is { } pinned && binding.Enabled)
+            // Taken whether or not the binding is switched on. A pin is itself the instruction to
+            // drive the fan, and the tick loop honours a claim on a switched-off binding, so making
+            // the pin wait for a curve it was written to ignore only ever lost it.
+            if (binding.ManualDuty is { } pinned)
             {
                 // Anything already holding it stays: a plugin mid-claim, or a failsafe that has not
                 // cleared, both outrank a stored value.
@@ -306,23 +320,32 @@ public sealed class ControlLoop
             : SensorId.None;
 
     /// <summary>
-    /// Whether a plugin may hold this control: the engine drives it.
+    /// Whether anything may hold this control: it is a fan the user has put in the configuration.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// This used to require a curve as well, because a curve was the only defined thing for a fan
-    /// to return to when a plugin let go or died - without one the tick loop held the last duty
-    /// forever, and the plugin was the only thing standing between the fan and whatever number it
-    /// had last chosen.
+    /// The whole rule, and it is deliberately almost nothing. It used to require a curve, and then
+    /// it required the binding to be switched on, and both were one mistake in different clothes:
+    /// they made handing a fan to a plugin - or to your own hand - conditional on first setting
+    /// that fan up in Impeller to be driven by Impeller. For a plugin that is backwards. Not
+    /// having to configure the fan in Impeller is the entire reason the plugin channel exists, and
+    /// a user who granted a fan to a program and was then told to go and give it a curve was being
+    /// asked to invent something they did not want in order to have it ignored.
     /// </para>
     /// <para>
-    /// <see cref="Rest"/> removed that. Every enabled control now has somewhere to go when nothing
-    /// is driving it, so the rule collapses to the one it always should have been. It was also
-    /// inconsistent while it lasted: a user could pin a curveless fan by hand, which is exactly the
-    /// state a plugin was being refused permission to create.
+    /// What made the rule look necessary was the tick loop skipping a switched-off binding before
+    /// it resolved ownership, so a claim on one was granted and every duty then discarded in
+    /// silence. The honest fix was there rather than here: switched off means Impeller's own
+    /// curves leave this fan alone, not that nobody may drive it, and <see cref="Rest"/> gives it
+    /// somewhere defined to go the moment the claimant lets go.
+    /// </para>
+    /// <para>
+    /// What remains is that the fan has to be in the configuration - less a restriction than a
+    /// fact. A binding is where the fan's limits, its calibration and its paired tachometer live,
+    /// and there is nothing to drive a fan through without one.
     /// </para>
     /// </remarks>
-    public bool CanBeHeldByPlugin(SensorId controlId) => IsDriven(controlId);
+    public bool CanBeClaimed(SensorId controlId) => _bindings.ContainsKey(controlId);
 
     /// <summary>
     /// Takes a control on a claimant's behalf, refusing when this configuration cannot honour it.
@@ -347,8 +370,7 @@ public sealed class ControlLoop
 
         var claimable = kind switch
         {
-            ControlOwnerKind.Plugin => CanBeHeldByPlugin(controlId),
-            ControlOwnerKind.ManualOverride => IsDriven(controlId),
+            ControlOwnerKind.Plugin or ControlOwnerKind.ManualOverride => CanBeClaimed(controlId),
             _ => true,
         };
 
@@ -516,12 +538,32 @@ public sealed class ControlLoop
 
         foreach (var binding in _bindings.Values)
         {
-            // Ahead of ownership resolution, which is only safe because nothing can hold a control
-            // this skips: TryAcquire refuses a claim on one, and a configuration change that
-            // invalidates a standing claim drops it. Without both of those, this line silently
-            // discards the duties of whoever owns the control.
-            if (!binding.Enabled || _registry.GetControl(binding.ControlId) is not { } control)
+            if (_registry.GetControl(binding.ControlId) is not { } control)
             {
+                continue;
+            }
+
+            // Switched off means Impeller's own curves leave this fan alone. It has never meant
+            // that nobody may drive it, and reading it that way here - ahead of ownership, so a
+            // claimant's duties were accepted and then dropped on the floor - is what forced the
+            // rule that a fan needed setting up in Impeller before a plugin could be handed it. A
+            // claimant holding the fan is something driving the fan.
+            //
+            // Unclaimed, it goes to its resting state: back to the board's own firmware where the
+            // hardware allows that, and to its failsafe duty where it does not. Rest does it once
+            // and remembers, so this is not a write per tick.
+            //
+            // Only if the engine has actually commanded it, though. A fan that has been switched
+            // off since the day it was added has never been touched, and handing back a fan nobody
+            // ever took would break the promise that nothing reaches the hardware until the user
+            // asks - on a first run, once per header on the board.
+            if (!binding.Enabled && _ownership.GetOwner(binding.ControlId).IsCurve)
+            {
+                if (_commandedDuties.ContainsKey(binding.ControlId) && Rest(binding, control, faults))
+                {
+                    written++;
+                }
+
                 continue;
             }
 

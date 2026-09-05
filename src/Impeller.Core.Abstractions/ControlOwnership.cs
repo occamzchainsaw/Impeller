@@ -140,10 +140,10 @@ public enum ControlAcquireFailure
     /// only thing standing between the fan and a stopped fan.
     /// </para>
     /// <para>
-    /// This is a refusal rather than a silent no-op because the tick loop skips a disabled binding
-    /// before it looks at ownership: a claim on one would be granted, accepted, and then have every
-    /// duty discarded without a word. The trap is that disabling the fan is exactly what a careful
-    /// user does so that two programs do not fight over it.
+    /// This is a refusal rather than a silent no-op because there is genuinely nothing to drive
+    /// the fan through: a binding is where its limits, calibration and paired tachometer live, and
+    /// the tick loop only walks the bindings it has. Being switched off is not one of the reasons -
+    /// a switched-off fan can be claimed, and driving it is what taking it means.
     /// </para>
     /// </remarks>
     NotDriven,

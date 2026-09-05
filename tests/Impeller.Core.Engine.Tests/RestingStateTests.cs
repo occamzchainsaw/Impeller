@@ -200,7 +200,7 @@ public class RestingStateTests
         // which until the dashboard rework there was no way to do anywhere in the UI.
         var harness = new Harness();
 
-        Assert.True(harness.Loop.CanBeHeldByPlugin(harness.FanId));
+        Assert.True(harness.Loop.CanBeClaimed(harness.FanId));
         Assert.True(harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, Plugin).Succeeded);
     }
 
@@ -224,16 +224,100 @@ public class RestingStateTests
     }
 
     [Fact]
-    public void A_plugin_still_cannot_hold_a_fan_the_engine_is_not_driving()
+    public void A_plugin_may_hold_a_fan_that_is_switched_off_and_the_fan_actually_turns()
     {
+        // The rule that replaced the curve rule, and it was the same mistake: switching a fan off
+        // meant the tick loop skipped it before it looked at ownership, so the claim had to be
+        // refused or the plugin's duties would vanish. Refusing it told a user who had granted a
+        // fan to a program to go and switch that fan on in Impeller - which is the configuring a
+        // plugin exists to save them from, and which they had every reason to think they had done.
+        //
+        // Asserted on the hardware rather than on the claim, because a claim that succeeds and is
+        // then discarded by the tick is the exact failure the old rule was papering over.
         var harness = new Harness();
         harness.Configure(withCurve: false, enabled: false);
 
-        Assert.False(harness.Loop.CanBeHeldByPlugin(harness.FanId));
+        Assert.True(harness.Loop.CanBeClaimed(harness.FanId));
+        Assert.True(harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, Plugin).Succeeded);
+
+        harness.Loop.TrySetRequestedDuty(harness.FanId, new Duty(42f), Plugin);
+        harness.Loop.Tick(Tick);
+
+        Assert.Equal(42f, harness.Fan.CommandedDuty!.Value.Percent, precision: 3);
+    }
+
+    [Fact]
+    public void A_switched_off_fan_the_engine_never_drove_stays_untouched_tick_after_tick()
+    {
+        // The guard rail on the change above. The tick loop looks at switched-off bindings now,
+        // where it used to skip them outright, so the promise that nothing reaches the hardware
+        // until the user asks is no longer structural and has to be asserted. Handing a fan back
+        // to firmware is a write like any other, and a fan nobody has ever taken does not need it.
+        var harness = new Harness(enabled: false);
+
+        for (var tick = 0; tick < 10; tick++)
+        {
+            harness.Loop.Tick(Tick);
+        }
+
+        Assert.Equal(0, harness.Fan.AutomaticModeRestoreAttempts);
+        Assert.Empty(harness.Fan.Writes);
+    }
+
+    [Fact]
+    public void A_switched_off_fan_a_plugin_lets_go_of_still_rests()
+    {
+        // Letting go of a switched-off fan has to land in the same place as letting go of a
+        // curveless one. The record of the rest is cleared while the plugin drives it, so this is
+        // the case that would freeze the fan if that record were merely never written.
+        var harness = new Harness();
+        harness.Configure(withCurve: false, enabled: false);
+
+        harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, Plugin);
+        harness.Loop.TrySetRequestedDuty(harness.FanId, new Duty(42f), Plugin);
+        harness.Loop.Tick(Tick);
+
+        Assert.Equal(42f, harness.Fan.CommandedDuty!.Value.Percent, precision: 3);
+
+        harness.Ownership.Release(harness.FanId, Plugin);
+        harness.Loop.Tick(Tick);
+
+        Assert.Equal(1, harness.Fan.AutomaticModeRestoreAttempts);
+    }
+
+    [Fact]
+    public void Nothing_may_hold_a_fan_that_is_not_in_the_configuration()
+    {
+        // What is left of the rule. Not a policy - there is no binding, so there are no limits, no
+        // calibration and no paired tachometer, and nothing to drive the fan through.
+        var harness = new Harness();
+        harness.Loop.Configure([harness.Curve], []);
+
+        Assert.False(harness.Loop.CanBeClaimed(harness.FanId));
 
         Assert.Equal(
             ControlAcquireFailure.NotDriven,
             harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, Plugin).Failure);
+    }
+
+    [Fact]
+    public void A_fan_taken_off_the_page_while_a_plugin_drove_it_is_handed_back()
+    {
+        // Removing a fan from the dashboard is now the way to reach the hazard that switching one
+        // off used to reach: the tick loop only walks the bindings it has, so without the handover
+        // on the way out the fan would stay at the plugin's last duty for the life of the machine.
+        var harness = new Harness();
+
+        harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, Plugin);
+        harness.Loop.TrySetRequestedDuty(harness.FanId, new Duty(35f), Plugin);
+        harness.Loop.Tick(Tick);
+
+        Assert.Equal(35f, harness.Fan.CommandedDuty!.Value.Percent, precision: 3);
+
+        harness.Loop.Configure([harness.Curve], []);
+
+        Assert.Equal(1, harness.Fan.AutomaticModeRestoreAttempts);
+        Assert.Equal(ControlOwnerKind.Curve, harness.Ownership.GetOwner(harness.FanId).Kind);
     }
 
     [Fact]

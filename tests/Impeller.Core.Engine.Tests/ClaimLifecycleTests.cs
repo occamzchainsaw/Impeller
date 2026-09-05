@@ -248,18 +248,20 @@ public class ClaimLifecycleTests
     }
 
     [Fact]
-    public void A_plugin_cannot_claim_a_control_the_engine_is_not_driving()
+    public void A_plugin_may_claim_a_control_that_is_switched_off()
     {
-        // The refusal that had no caller until now. Granting this would mean a plugin whose every
-        // write is accepted and discarded, with nothing anywhere saying so.
+        // Refused, once, and for a reason that was true of the tick loop rather than of the fan:
+        // it skipped a switched-off binding before resolving ownership, so a claim on one meant a
+        // plugin whose every write was accepted and discarded. Fixed where it belonged, and the
+        // refusal went with it - a user who grants a fan to a program has said what they want, and
+        // sending them back to Impeller to switch that fan on is asking twice.
         var harness = new Harness();
         harness.Configure(enabled: false);
 
         var result = harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, PluginA);
 
-        Assert.False(result.Succeeded);
-        Assert.Equal(ControlAcquireFailure.NotDriven, result.Failure);
-        Assert.Equal(ControlOwnerKind.Curve, harness.Ownership.GetOwner(harness.FanId).Kind);
+        Assert.True(result.Succeeded);
+        Assert.Equal(ControlOwnerKind.Plugin, harness.Ownership.GetOwner(harness.FanId).Kind);
     }
 
     [Fact]
@@ -291,18 +293,24 @@ public class ClaimLifecycleTests
     }
 
     [Fact]
-    public void Nobody_may_pin_a_control_the_engine_has_been_told_to_leave_alone()
+    public void A_person_may_pin_a_control_the_engine_is_not_otherwise_driving()
     {
-        // The same trap as the plugin one and the one a user hits far more often: pinning a
-        // disabled fan used to be accepted, saved to the configuration, and never written.
+        // Pinning a switched-off fan used to be accepted, saved to the configuration, and never
+        // written - so it was refused. It is written now, which makes the refusal the wrong half
+        // of the pair to keep: taking a fan by hand is itself the instruction to drive it.
         var harness = new Harness();
         harness.Configure(enabled: false);
 
         var result = harness.Loop.TryAcquire(
             harness.FanId, ControlOwnerKind.ManualOverride, ControlOwnershipRegistry.ManualClaimant);
 
-        Assert.False(result.Succeeded);
-        Assert.Equal(ControlAcquireFailure.NotDriven, result.Failure);
+        Assert.True(result.Succeeded);
+
+        harness.Loop.TrySetRequestedDuty(
+            harness.FanId, new Duty(35f), ControlOwnershipRegistry.ManualClaimant);
+        harness.Loop.Tick(Tick);
+
+        Assert.Equal(35f, harness.Commanded, precision: 3);
     }
 
     [Fact]
@@ -328,16 +336,35 @@ public class ClaimLifecycleTests
     }
 
     [Fact]
-    public void A_plugin_holding_a_fan_that_a_new_configuration_disables_is_taken_off_it_and_told()
+    public void A_plugin_keeps_a_fan_a_new_configuration_switches_off()
     {
-        // The grant is checked when the claim is taken, but a user can disable the fan a minute
-        // later. Leaving the claim in place would put the plugin back in the silent-discard state
-        // that refusing the claim exists to prevent.
+        // This used to take the fan back, because the tick loop skipped a switched-off binding and
+        // a claim it would not honour was worse than no claim. It honours it now, and taking the
+        // fan back would be the wrong half to keep: switching a fan off in Impeller so that two
+        // programs do not fight over it is exactly what a careful user does before handing it to
+        // one of them.
         var harness = new Harness();
         harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, PluginA);
         harness.Loop.TrySetRequestedDuty(harness.FanId, new Duty(80f), PluginA);
 
         harness.Configure(enabled: false);
+        harness.Loop.Tick(Tick);
+
+        Assert.Equal(ControlOwnerKind.Plugin, harness.Ownership.GetOwner(harness.FanId).Kind);
+        Assert.Equal(80f, harness.Commanded, precision: 3);
+    }
+
+    [Fact]
+    public void A_plugin_holding_a_fan_a_new_configuration_drops_is_taken_off_it_and_told()
+    {
+        // What is left of the rule, and the one case that genuinely cannot be honoured: with no
+        // binding there are no limits, no calibration and no tachometer, and nothing to drive the
+        // fan through. Leaving the claim would put the plugin back in the silent-discard state.
+        var harness = new Harness();
+        harness.Loop.TryAcquire(harness.FanId, ControlOwnerKind.Plugin, PluginA);
+        harness.Loop.TrySetRequestedDuty(harness.FanId, new Duty(80f), PluginA);
+
+        harness.Loop.Configure([harness.Curve], []);
 
         Assert.Equal(ControlOwnerKind.Curve, harness.Ownership.GetOwner(harness.FanId).Kind);
         Assert.Equal(OwnershipChangeReason.ConfigurationChanged, harness.LastReason);

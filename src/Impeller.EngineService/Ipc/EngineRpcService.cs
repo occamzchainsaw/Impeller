@@ -411,7 +411,7 @@ public sealed class EngineRpcService(
         CancellationToken cancellationToken = default) =>
         // Refused rather than stored, because a grant on a fan the engine is not driving is a
         // permission that fails the first time it is used, and the user would have no idea why.
-        Task.FromResult(loop.CanBeHeldByPlugin(controlId) && plugins.Grant(pluginId, controlId));
+        Task.FromResult(loop.CanBeClaimed(controlId) && plugins.Grant(pluginId, controlId));
 
     /// <inheritdoc />
     public Task<bool> RevokePluginControlAsync(
@@ -533,7 +533,7 @@ public sealed class EngineRpcService(
             control.SupportsAutomaticMode,
             owner.Kind,
             owner.ClaimantId,
-            loop.CanBeHeldByPlugin(control.Id));
+            loop.CanBeClaimed(control.Id));
     }
 
     private static ControlAcquireOutcome Refused(ControlAcquireFailure failure, ControlOwner? current) =>

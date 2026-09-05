@@ -29,13 +29,13 @@ public enum PluginAcquireFailure
     AlreadyOwned,
 
     /// <summary>
-    /// The engine is not driving this control, so there is nothing for a plugin to take over.
+    /// This fan is not in Impeller's configuration, so there is nothing to drive it through.
     /// </summary>
     /// <remarks>
-    /// A control is claimable only when it is enabled in the current configuration and has a curve
-    /// assigned — the curve being what the fan returns to when the plugin lets go or dies. Without
-    /// one there is no safe state to fall back to, and a plugin holding it would be the only thing
-    /// standing between the fan and a stopped fan.
+    /// The fan has to be on Impeller's dashboard. It does not have to be switched on there, and it
+    /// does not need a curve. A binding is where a fan's limits, its calibration and its paired
+    /// tachometer live, so a fan without one is a fan the engine has nothing to say about — which
+    /// in practice means it was taken off the dashboard after this plugin was granted it.
     /// </remarks>
     NotDriven,
 

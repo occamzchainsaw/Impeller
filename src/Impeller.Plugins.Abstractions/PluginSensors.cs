@@ -111,10 +111,11 @@ public sealed record SensorInfo(
 /// <param name="Holder">Who is driving it.</param>
 /// <param name="HolderId">Which specific claimant, where that means anything.</param>
 /// <param name="Granted">Whether this plugin has been granted the right to claim it.</param>
-/// <param name="Driven">
-/// Whether the engine is actually driving this control — it is enabled in the current
-/// configuration and has a curve to fall back to. A control that is not driven cannot be claimed:
-/// see <see cref="PluginAcquireFailure.NotDriven"/>.
+/// <param name="Claimable">
+/// Whether this control can be claimed at all: it is a fan the user has put on Impeller's
+/// dashboard. It does not have to be switched on there, and it does not need a curve — a plugin
+/// exists to drive fans Impeller is not driving. See <see cref="PluginAcquireFailure.NotDriven"/>
+/// for the one case this is false.
 /// </param>
 /// <remarks>
 /// <para>
@@ -142,7 +143,7 @@ public sealed record ControlInfo(
     ControlHolder Holder,
     string? HolderId,
     bool Granted,
-    bool Driven);
+    bool Claimable);
 
 /// <summary>Everything a plugin needs to know about the machine, on request.</summary>
 /// <param name="EngineVersion">Which engine is answering.</param>

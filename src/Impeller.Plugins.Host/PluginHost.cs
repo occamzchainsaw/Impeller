@@ -512,7 +512,7 @@ public sealed partial class PluginHost : IAsyncDisposable
             PluginTranslation.ToHolder(owner.Kind),
             owner.ClaimantId,
             admission?.MayControl(reference) == true,
-            Loop.CanBeHeldByPlugin(control.Id));
+            Loop.CanBeClaimed(control.Id));
     }
 
     /// <summary>

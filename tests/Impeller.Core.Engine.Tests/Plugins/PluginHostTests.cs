@@ -153,10 +153,12 @@ public sealed class PluginHostTests
     }
 
     [Fact]
-    public async Task A_fan_the_engine_is_not_driving_is_refused_as_not_driven()
+    public async Task A_fan_switched_off_in_Impeller_can_still_be_claimed()
     {
-        // Disabling a fan so two programs "do not fight" is exactly what a careful user does, and
-        // before this refusal existed the claim was granted and every duty silently discarded.
+        // Refused, once, and it was the refusal that made the plugin channel pointless: disabling
+        // a fan so two programs "do not fight" is exactly what a careful user does before handing
+        // it to one of them, and being told to go back and switch it on again is being asked to
+        // set the fan up in Impeller in order not to have to set the fan up in Impeller.
         await using var rig = new Rig();
         rig.Configure(enabled: false);
 
@@ -165,9 +167,33 @@ public sealed class PluginHostTests
 
         var outcome = await plug.Engine.AcquireAsync(rig.FanRef);
 
+        Assert.True(outcome.Granted, outcome.Message);
+
+        // On the hardware, because a claim that is granted and then discarded by the tick loop is
+        // the exact failure the refusal was standing in for.
+        await plug.Engine.SetDutyAsync(rig.FanRef, 62f);
+        rig.Loop.Tick(Tick);
+
+        Assert.Equal(62f, rig.Commanded, precision: 3);
+    }
+
+    [Fact]
+    public async Task A_fan_that_is_not_on_the_dashboard_is_refused_as_not_driven()
+    {
+        // All that is left of the rule. A grant outlives the fan's binding, so a user who removes
+        // a fan they had granted lands here - and the message has to send them somewhere real.
+        await using var rig = new Rig();
+
+        await using var plug = rig.Connect();
+        await rig.AdmitAndGrantAsync(plug);
+
+        rig.Forget();
+
+        var outcome = await plug.Engine.AcquireAsync(rig.FanRef);
+
         Assert.False(outcome.Granted);
         Assert.Equal(PluginAcquireFailure.NotDriven, outcome.Failure);
-        Assert.Contains("Switch it on", outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("dashboard", outcome.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -443,17 +469,18 @@ public sealed class PluginHostTests
     }
 
     [Fact]
-    public async Task A_configuration_that_stops_driving_a_fan_takes_it_back_from_the_plugin()
+    public async Task A_configuration_that_drops_a_fan_takes_it_back_from_the_plugin()
     {
-        // The grant is checked when the claim is taken, but a user can disable the fan at any point
-        // afterwards. Leaving a plugin holding a control the engine has stopped writing is the
-        // silent failure this whole rule exists to remove.
+        // The grant is checked when the claim is taken, but a user can take the fan off the page
+        // at any point afterwards. Leaving a plugin holding a control that has no binding left is
+        // the silent failure this whole rule exists to remove - there is nothing to drive it
+        // through, so every duty would be accepted and discarded.
         await using var rig = new Rig();
         await using var plug = rig.Connect();
         await rig.AdmitAndGrantAsync(plug);
         await plug.Engine.AcquireAsync(rig.FanRef);
 
-        rig.Configure(enabled: false);
+        rig.Forget();
 
         await Until(() => plug.Lost.Count == 1, "the configuration change to be reported");
         Assert.Equal(ControlLostReason.ConfigurationChanged, plug.Lost[0].Reason);
@@ -608,6 +635,9 @@ public sealed class PluginHostTests
     [Fact]
     public async Task A_snapshot_says_which_fans_are_granted_and_which_are_claimable()
     {
+        // Switched off in Impeller and still claimable, which is the pair a plugin's settings
+        // window has to be able to tell apart: the grant is the user's decision about this app,
+        // and claimability is only whether the fan is on the page at all.
         await using var rig = new Rig();
         rig.Configure(enabled: false);
 
@@ -617,7 +647,7 @@ public sealed class PluginHostTests
         var control = Assert.Single((await plug.Engine.GetSensorsAsync()).Controls);
 
         Assert.True(control.Granted);
-        Assert.False(control.Driven);
+        Assert.True(control.Claimable);
     }
 
     [Fact]
@@ -788,6 +818,9 @@ public sealed class PluginHostTests
 
         /// <summary>Pairs a sensor with the fan, the way calibration does.</summary>
         public void Pair() => Configure(paired: true);
+
+        /// <summary>Takes the fan off the page, the way removing its card does.</summary>
+        public void Forget() => Loop.Configure([Curve], []);
 
         /// <summary>Opens a connection and hands back the plugin end of it.</summary>
         public Plug Connect()

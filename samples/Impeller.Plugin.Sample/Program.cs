@@ -65,7 +65,7 @@ impeller.AdmissionChanged += async (_, admission) =>
     }
 
     // The first fan the user granted. Listing is not permission, so this filters on Granted.
-    var granted = machine.Controls.FirstOrDefault(control => control.Granted && control.Driven);
+    var granted = machine.Controls.FirstOrDefault(control => control.Granted && control.Claimable);
 
     if (granted is null)
     {

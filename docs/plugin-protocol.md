@@ -127,18 +127,31 @@ Refusals, and what each actually means:
 | `NotAdmitted` | You have not said hello, or you were refused |
 | `NotPermitted` | The user has not granted you this fan |
 | `AlreadyOwned` | Someone else holds it; the outcome names who |
-| `NotDriven` | Impeller is not driving this fan — it is switched off, or has no curve |
+| `NotDriven` | The fan is not on Impeller's dashboard, so there is nothing to drive it through |
 | `UnknownControl` | No control with that reference exists |
 | `EngineUnavailable` | The engine is in failsafe and granting nothing |
 
-`NotDriven` deserves explanation, because it is the one that surprises people. **A plugin may only
-hold a fan that is enabled and has a curve assigned.** The curve is what the fan falls back to when
-you let go or die. Without one there is no safe state to return to, and your process would be the
-only thing standing between that fan and a stopped fan — so a crash would be a cooling failure
-rather than a fan going back to its curve.
+`NotDriven` is the only one that needs explaining, and mostly because it used to mean something
+else. **A fan you have been granted has to be on Impeller's dashboard.** It does not have to be
+switched on there, and it does not need a curve.
 
-This bites in a way that feels backwards at first: switching a fan *off* in Impeller so that two
-programs "don't fight" is exactly what stops a plugin being able to drive it.
+Two earlier versions of this rule required exactly those things, and both were the same mistake:
+they made driving a fan from your app conditional on first setting that fan up in Impeller to be
+driven by Impeller. That is backwards — not having to configure the fan in Impeller is why this
+channel exists — and it bit in the way that feels most unfair, because switching a fan *off* so
+that two programs "don't fight" is precisely what a careful user does before handing it to one of
+them. If you are reading an older build's message telling you to go and switch a fan on, that is
+the bug, not you.
+
+What is left is not a policy so much as a fact. A fan's entry on the dashboard is where its
+minimum and maximum duty, its calibration and its paired tachometer live, and there is nothing to
+drive a fan through without one. In practice you see this only when a user removes a fan they had
+already granted you: the grant outlives the fan's entry, so your next `AcquireAsync` is refused.
+`ControlInfo.Claimable` says the same thing ahead of time, so a settings window can grey the row
+rather than wait for a refusal.
+
+When you let go — released, crashed, lease lapsed — the fan goes wherever the configuration says:
+back to its curve if it has one, and back to the board's own firmware if it does not.
 
 ### Leases
 
