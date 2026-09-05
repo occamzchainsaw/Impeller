@@ -197,11 +197,18 @@
                                 <ItemsControl ItemsSource="{x:Bind ViewModel.SensorPicker.Groups}">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate x:DataType="sensors:SensorGroupViewModel">
+                                            <!--
+                                                Bound both ways: the group holding the sensor this
+                                                curve already reads opens itself, and a search opens
+                                                what it found. Unbound, every group was shut every
+                                                time and the current choice was invisible.
+                                            -->
                                             <Expander
                                                 Margin="0,0,0,4"
                                                 HorizontalAlignment="Stretch"
                                                 HorizontalContentAlignment="Stretch"
-                                                Header="{x:Bind Name}">
+                                                Header="{x:Bind Name}"
+                                                IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}">
                                                 <ItemsControl ItemsSource="{x:Bind Sensors}">
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate x:DataType="sensors:SensorItemViewModel">

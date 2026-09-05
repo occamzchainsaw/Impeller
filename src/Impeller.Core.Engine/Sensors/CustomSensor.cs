@@ -46,6 +46,16 @@ public sealed class CustomSensor : ISensor
     /// <inheritdoc />
     public string Name => _definition.Name;
 
+    /// <summary>
+    /// What these belong to, where a measured sensor names its hardware.
+    /// </summary>
+    /// <remarks>
+    /// Answered rather than left empty, because the shell heads a group with it. Left empty it fell
+    /// back to the path, and the Sensors page showed a heading reading
+    /// <c>custom/b9077721-e3a9-4ba8-acf3-b83209164176</c>.
+    /// </remarks>
+    public string HardwareName => CustomSensorProvider.Hardware;
+
     /// <inheritdoc />
     public SensorKind Kind => _definition.Measures;
 

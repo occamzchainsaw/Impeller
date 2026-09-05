@@ -24,6 +24,11 @@
                 <StackPanel Spacing="12">
                     <TextBlock
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="A configuration holds every curve and everything each fan is set to. One runs at a time, and switching to another takes effect straight away."
+                        TextWrapping="Wrap" />
+
+                    <TextBlock
+                        Style="{StaticResource BodyStrongTextBlockStyle}"
                         Text="{x:Bind local:SettingsPage.Running(ViewModel.CurrentConfiguration), Mode=OneWay}" />
 
                     <Grid ColumnSpacing="12">
@@ -70,7 +75,7 @@
                         FontSize="12"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         IsTextSelectionEnabled="True"
-                        Text="{x:Bind ViewModel.ConfigurationRoot, Mode=OneWay}" />
+                        Text="{x:Bind local:SettingsPage.SavedIn(ViewModel.ConfigurationRoot), Mode=OneWay}" />
                 </StackPanel>
             </Expander>
 
@@ -126,7 +131,7 @@
                 <StackPanel Spacing="12">
                     <TextBlock
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="Both take several minutes and drive every fan while they run. Pair first: calibration needs to know which tacho belongs to which header."
+                        Text="Both take several minutes and drive every fan while they run. Pair first: calibrating a fan means changing its speed and watching what happens, so Impeller has to know which speed reading belongs to which header."
                         TextWrapping="Wrap" />
 
                     <StackPanel Orientation="Horizontal" Spacing="12">
@@ -185,11 +190,20 @@
                 HorizontalContentAlignment="Stretch"
                 Header="Diagnostics">
                 <StackPanel Spacing="12">
+                    <!--
+                        The last clause is the one that matters. A button labelled only "Collect",
+                        on a fan controller running as LocalSystem, invites the wrong assumption.
+                    -->
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="Collects a report of what Impeller can see — engine version, hardware detected, the loaded configuration, recent errors — for attaching to a bug report. It is copied to the clipboard and sent nowhere."
+                        TextWrapping="Wrap" />
+
                     <StackPanel Orientation="Horizontal" Spacing="12">
-                        <Button Command="{x:Bind ViewModel.CollectDiagnosticsCommand}" Content="Collect" />
+                        <Button Command="{x:Bind ViewModel.CollectDiagnosticsCommand}" Content="Collect the report" />
                         <Button
                             Command="{x:Bind ViewModel.CopyDiagnosticsCommand}"
-                            Content="Copy"
+                            Content="Copy to clipboard"
                             IsEnabled="{x:Bind local:SettingsPage.HasText(ViewModel.Diagnostics), Mode=OneWay}" />
                     </StackPanel>
 

@@ -1,4 +1,5 @@
 ﻿using System.Collections.ObjectModel;
+using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Impeller.Core.Abstractions;
@@ -76,6 +77,14 @@ public sealed partial class SensorItemViewModel(
     /// <summary>What it measures.</summary>
     public SensorKind Kind { get; } = descriptor.Kind;
 
+    /// <summary>What it measures, in words.</summary>
+    /// <remarks>
+    /// The enum was on screen directly, so the column that should say "Fan speed" said "FanSpeed"
+    /// - a name written for the compiler, shown to the user. Only the compound names need help;
+    /// the rest are already the English word for the thing.
+    /// </remarks>
+    public string KindText { get; } = Describe(descriptor.Kind);
+
     /// <summary>Where it lives, shown when two sensors are otherwise indistinguishable.</summary>
     public string HardwarePath { get; } = descriptor.HardwarePath;
 
@@ -85,6 +94,18 @@ public sealed partial class SensorItemViewModel(
 
     /// <summary>Takes a new reading.</summary>
     public void Apply(float? value) => ValueText = Format(Kind, value);
+
+    /// <summary>One kind of measurement, named the way a person would name it.</summary>
+    private static string Describe(SensorKind kind) => kind switch
+    {
+        SensorKind.FanSpeed => "Fan speed",
+
+        // "Control" alone is the shell's own word for it. What the row is, to the person reading,
+        // is the header a fan plugs into.
+        SensorKind.Control => "Fan header",
+        SensorKind.Unknown => "Unrecognised",
+        _ => kind.ToString(),
+    };
 
     /// <summary>
     /// A reading with its unit, or a dash.
@@ -127,6 +148,16 @@ public sealed partial class SensorGroupViewModel(string key, string name) : Obse
     /// <summary>Whether anything in it survived the filter.</summary>
     [ObservableProperty]
     public partial bool IsVisible { get; set; } = true;
+
+    /// <summary>Whether its sensors are showing.</summary>
+    /// <remarks>
+    /// Closed to begin with. This machine reports 193 sensors and every one of them used to be on
+    /// screen at once, which is not a list anyone reads - it is a wall to scroll past on the way to
+    /// the search box. Closed, the page opens as what it actually is: the hardware Impeller found,
+    /// with the readings a click away.
+    /// </remarks>
+    [ObservableProperty]
+    public partial bool IsExpanded { get; set; }
 }
 
 /// <summary>
@@ -149,6 +180,14 @@ public sealed partial class SensorTreeViewModel : ObservableObject
 {
     private readonly List<SensorDescriptor> _all = [];
     private readonly Dictionary<SensorId, SensorItemViewModel> _items = [];
+
+    /// <summary>The groups the user opened, by key, so a rebuild does not shut them again.</summary>
+    /// <remarks>
+    /// Every rebuild replaces the group objects, so their state has to live somewhere that outlives
+    /// them. Keyed on the hardware key rather than the name for the reason the grouping is: two
+    /// pieces of hardware are allowed to share a name.
+    /// </remarks>
+    private readonly HashSet<string> _opened = new(StringComparer.Ordinal);
 
     /// <summary>The hardware groups that currently have anything to show.</summary>
     public ObservableCollection<SensorGroupViewModel> Groups { get; } = [];
@@ -197,7 +236,15 @@ public sealed partial class SensorTreeViewModel : ObservableObject
     }
 
     /// <summary>Selects the row for an id, if the tree holds one. Used to show a curve's current input.</summary>
-    public void Select(SensorId id) => Selected = _items.GetValueOrDefault(id);
+    public void Select(SensorId id)
+    {
+        Selected = _items.GetValueOrDefault(id);
+
+        if (Selected is { } row)
+        {
+            Reveal(row);
+        }
+    }
 
     /// <summary>Takes one tick's readings, updating rows in place.</summary>
     /// <remarks>
@@ -238,16 +285,27 @@ public sealed partial class SensorTreeViewModel : ObservableObject
     {
         var previous = Selected?.Id;
 
+        foreach (var group in Groups)
+        {
+            group.PropertyChanged -= OnGroupChanged;
+        }
+
         Groups.Clear();
         _items.Clear();
 
+        // A search opens what it finds, and closing the search closes them again - except the ones
+        // the user opened themselves, which were their answer to a question and outlast the search.
+        var searching = !string.IsNullOrWhiteSpace(Search);
         var matching = _all.Where(Matches).ToList();
 
         // Grouped, then each group's rows ordered by kind so a card's temperatures, speeds and
         // controls arrive in the same order on every piece of hardware.
         foreach (var group in matching.GroupBy(SensorNaming.HardwareKey))
         {
-            var view = new SensorGroupViewModel(group.Key, SensorNaming.HardwareName(group));
+            var view = new SensorGroupViewModel(group.Key, SensorNaming.HardwareName(group))
+            {
+                IsExpanded = searching || _opened.Contains(group.Key),
+            };
 
             foreach (var descriptor in group.OrderBy(sensor => sensor.Kind).ThenBy(sensor => sensor.Name, StringComparer.OrdinalIgnoreCase))
             {
@@ -256,6 +314,9 @@ public sealed partial class SensorTreeViewModel : ObservableObject
                 _items[descriptor.Id] = item;
             }
 
+            // Subscribed after the initial state is set, so opening a group to show a search
+            // result is not mistaken for the user having asked for it.
+            view.PropertyChanged += OnGroupChanged;
             Groups.Add(view);
         }
 
@@ -269,6 +330,46 @@ public sealed partial class SensorTreeViewModel : ObservableObject
         if (Selected is { } selected)
         {
             selected.IsSelected = true;
+            Reveal(selected);
+        }
+    }
+
+    /// <summary>
+    /// Opens the group a row is in, so a chosen sensor is not hidden inside a closed one.
+    /// </summary>
+    /// <remarks>
+    /// The picker opens on the sensor a curve already reads. With the groups closed by default that
+    /// selection would be somewhere behind one of them, which looks exactly like no selection at
+    /// all - the bug <see cref="SensorItemViewModel.IsSelected"/> exists to have fixed once.
+    /// </remarks>
+    private void Reveal(SensorItemViewModel row)
+    {
+        foreach (var group in Groups)
+        {
+            if (group.Sensors.Contains(row))
+            {
+                group.IsExpanded = true;
+                return;
+            }
+        }
+    }
+
+    /// <summary>Records the groups the user opens and closes, so their choice survives a rebuild.</summary>
+    private void OnGroupChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(SensorGroupViewModel.IsExpanded)
+            || sender is not SensorGroupViewModel group)
+        {
+            return;
+        }
+
+        if (group.IsExpanded)
+        {
+            _opened.Add(group.Key);
+        }
+        else
+        {
+            _opened.Remove(group.Key);
         }
     }
 
@@ -305,6 +406,14 @@ internal static class SensorNaming
     /// </remarks>
     public static string HardwareKey(SensorDescriptor sensor)
     {
+        // A computed sensor is not on hardware, and its fingerprint says so by carrying the
+        // sensor's own id where the others carry a chip. Keyed structurally it would land in a
+        // group of one, headed by a GUID, so they are grouped by the thing they do share.
+        if (string.Equals(sensor.ProviderId, ProviderIds.Derived, StringComparison.Ordinal))
+        {
+            return sensor.ProviderId;
+        }
+
         var path = sensor.HardwarePath;
         var kind = path.LastIndexOf('/');
 

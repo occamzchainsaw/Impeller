@@ -32,6 +32,23 @@ public class SensorTreeTests
         Sensor("AMD Radeon RX 7800 XT", "GPU Fan", SensorKind.FanSpeed, "lhm/gpu-amd/0/fan/0", 0f),
     ];
 
+    /// <summary>A computed sensor, whose fingerprint carries its own id where a chip would be.</summary>
+    private static SensorDescriptor Derived(string name)
+    {
+        var id = SensorId.New();
+        return new SensorDescriptor(
+            id,
+            name,
+            name,
+            CustomHardware,
+            SensorKind.Temperature,
+            ProviderIds.Derived,
+            $"custom/{id}/temperature/0",
+            42f);
+    }
+
+    private const string CustomHardware = "Custom sensors";
+
     private static SensorTreeViewModel Loaded()
     {
         var tree = new SensorTreeViewModel();
@@ -260,5 +277,120 @@ public class SensorTreeTests
         tree.Search = "package";
 
         Assert.True(tree.Groups[0].Sensors[0].IsSelected);
+    }
+
+    [Fact]
+    public void Groups_start_closed()
+    {
+        // 193 rows on screen is not a list, it is a wall to scroll past on the way to the search.
+        var tree = Loaded();
+
+        Assert.All(tree.Groups, group => Assert.False(group.IsExpanded, $"{group.Name} opened itself."));
+    }
+
+    [Fact]
+    public void A_search_opens_what_it_found()
+    {
+        var tree = Loaded();
+
+        tree.Search = "GPU";
+
+        Assert.NotEmpty(tree.Groups);
+        Assert.All(tree.Groups, group => Assert.True(group.IsExpanded, $"{group.Name} stayed shut."));
+    }
+
+    [Fact]
+    public void Clearing_the_search_closes_them_again()
+    {
+        var tree = Loaded();
+
+        tree.Search = "GPU";
+        tree.Search = string.Empty;
+
+        Assert.All(tree.Groups, group => Assert.False(group.IsExpanded, $"{group.Name} stayed open."));
+    }
+
+    [Fact]
+    public void A_group_the_user_opened_stays_open_through_a_search()
+    {
+        // Their own answer to a question, not a side effect of typing, so it outlasts the search.
+        var tree = Loaded();
+        var board = tree.Groups.Single(group => group.Name == "Nuvoton NCT6687D");
+
+        board.IsExpanded = true;
+        tree.Search = "GPU";
+        tree.Search = string.Empty;
+
+        Assert.True(tree.Groups.Single(group => group.Name == "Nuvoton NCT6687D").IsExpanded);
+    }
+
+    [Fact]
+    public void A_group_the_user_closed_stays_closed()
+    {
+        var tree = Loaded();
+        var board = tree.Groups.Single(group => group.Name == "Nuvoton NCT6687D");
+
+        board.IsExpanded = true;
+        board.IsExpanded = false;
+        tree.Search = "Fan";
+        tree.Search = string.Empty;
+
+        Assert.False(tree.Groups.Single(group => group.Name == "Nuvoton NCT6687D").IsExpanded);
+    }
+
+    [Fact]
+    public void Choosing_a_sensor_opens_the_group_it_is_in()
+    {
+        // The picker opens on the sensor a curve already reads. Behind a closed group, that looks
+        // exactly like nothing having been chosen.
+        var machine = Machine();
+        var tree = new SensorTreeViewModel();
+        tree.Load(machine);
+
+        tree.Select(machine.Single(sensor => sensor.Name == "GPU Core").Id);
+
+        var gpu = tree.Groups.Single(group => group.Name == "AMD Radeon RX 7800 XT");
+        Assert.True(gpu.IsExpanded);
+        Assert.Same(gpu.Sensors.Single(row => row.Name == "GPU Core"), tree.Selected);
+    }
+
+    [Fact]
+    public void A_selected_sensor_is_still_visible_after_a_search_is_cleared()
+    {
+        var machine = Machine();
+        var tree = new SensorTreeViewModel();
+        tree.Load(machine);
+        tree.Select(machine.Single(sensor => sensor.Name == "GPU Core").Id);
+
+        tree.Search = "GPU";
+        tree.Search = string.Empty;
+
+        Assert.True(tree.Groups.Single(group => group.Name == "AMD Radeon RX 7800 XT").IsExpanded);
+    }
+
+    [Fact]
+    public void A_kind_is_named_the_way_a_person_would_name_it()
+    {
+        // The enum used to be on screen directly, so a tachometer read "FanSpeed".
+        var tree = Loaded();
+        var board = tree.Groups.Single(group => group.Name == "Nuvoton NCT6687D");
+
+        Assert.Equal("Fan speed", board.Sensors.Single(row => row.Name == "CPU Fan").KindText);
+        Assert.Equal("Fan header", board.Sensors.Single(row => row.Name == "Fan #4").KindText);
+        Assert.Equal("Temperature", board.Sensors.Single(row => row.Name == "System").KindText);
+    }
+
+    [Fact]
+    public void Computed_sensors_share_one_group_instead_of_one_each()
+    {
+        // Their fingerprints carry their own ids, so keyed like hardware every one of them was a
+        // group of its own - and the heading was the GUID.
+        var tree = new SensorTreeViewModel();
+        tree.Load([.. Machine(), Derived("Water average"), Derived("CPU and GPU mix")]);
+
+        var custom = tree.Groups.Single(group => group.Name == CustomHardware);
+
+        Assert.Equal(2, custom.Sensors.Count);
+        Assert.Equal(4, tree.Groups.Count);
     }
 }

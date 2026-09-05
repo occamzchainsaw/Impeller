@@ -45,6 +45,17 @@ public sealed partial class SettingsPage : Page
     /// <summary>Shows something only while a flag is set.</summary>
     public static Visibility WhenTrue(bool value) => value ? Visibility.Visible : Visibility.Collapsed;
 
+    /// <summary>
+    /// Where the configurations are kept, said rather than merely shown.
+    /// </summary>
+    /// <remarks>
+    /// A bare path under a row of buttons is a fact with no question attached to it. It is here
+    /// because a portable install keeps its files beside the executable and an installed one does
+    /// not, and the answer to "where did my configurations go" should not need reasoning about.
+    /// </remarks>
+    public static string SavedIn(string? path) =>
+        string.IsNullOrWhiteSpace(path) ? string.Empty : $"Kept in {path}";
+
     /// <summary>Which configuration is in force, spelled out.</summary>
     public static string Running(string name) =>
         string.IsNullOrWhiteSpace(name) ? "Nothing loaded yet." : $"Running '{name}'.";

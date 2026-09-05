@@ -31,10 +31,13 @@
                 Text="{x:Bind local:SensorsPage.Showing(ViewModel.Tree.VisibleCount), Mode=OneWay}" />
         </Grid>
 
-        <!--  A search box rather than a scroll: 193 rows is not a list anyone reads through.  -->
+        <!--
+            A search box rather than a scroll: 193 rows is not a list anyone reads through. Typing
+            opens the hardware that matched, and clearing closes it again.
+        -->
         <AutoSuggestBox
             Grid.Row="1"
-            PlaceholderText="Search by name or hardware path"
+            PlaceholderText="Search for a sensor, or the hardware it is on"
             QueryIcon="Find"
             Text="{x:Bind ViewModel.Tree.Search, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
@@ -47,7 +50,7 @@
                             HorizontalAlignment="Stretch"
                             HorizontalContentAlignment="Stretch"
                             Header="{x:Bind Name}"
-                            IsExpanded="True">
+                            IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}">
                             <ItemsControl ItemsSource="{x:Bind Sensors}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate x:DataType="sensors:SensorItemViewModel">
@@ -84,7 +87,7 @@
                                                 Grid.Column="2"
                                                 MinWidth="96"
                                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                Text="{x:Bind Kind}"
+                                                Text="{x:Bind KindText}"
                                                 TextAlignment="Right" />
                                         </Grid>
                                     </DataTemplate>

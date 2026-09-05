@@ -221,12 +221,27 @@ public sealed partial class CurvesViewModel(EngineConnection connection, Notific
     /// Records which sensor the open curve should read.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Here rather than on the tree, because choosing one is an edit: it has to mark the curve
     /// unsaved and refresh the line the picker is folded behind.
+    /// </para>
+    /// <para>
+    /// An echo is not an edit. The radio buttons raise <c>Checked</c> when they are realised, not
+    /// only when they are clicked, so opening the group that holds the current sensor - which is
+    /// now what happens every time a curve is opened - announced a choice nobody made and marked
+    /// every curve unsaved on sight. Comparing against what the editor already reads is what tells
+    /// the two apart, and it needs no suppression flag to do it.
+    /// </para>
     /// </remarks>
     public void ChooseSensor(SensorItemViewModel sensor)
     {
         ArgumentNullException.ThrowIfNull(sensor);
+
+        if (Editor is { } current && current.Source == sensor.Id)
+        {
+            SensorPicker.Selected = sensor;
+            return;
+        }
 
         SensorPicker.Selected = sensor;
 

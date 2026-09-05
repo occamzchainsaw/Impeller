@@ -22,7 +22,10 @@ namespace Impeller.Core.Engine.Sensors;
 public sealed class CustomSensorProvider(TimeProvider timeProvider) : IDerivedSensorProvider
 {
     /// <summary>The provider id these sensors' fingerprints carry.</summary>
-    public const string Id = "custom";
+    public const string Id = ProviderIds.Derived;
+
+    /// <summary>What to head these sensors with, where the others name a piece of hardware.</summary>
+    public const string Hardware = "Custom sensors";
 
     private readonly TimeProvider _time = timeProvider;
     private readonly Lock _gate = new();
