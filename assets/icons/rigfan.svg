@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="100%" height="100%">
+  <title>Rig Fan Control</title>
+
+  <!--
+    A knob: one fan, set to a speed by a person and left there. Solid and compact against Impeller's
+    open rotor, and warm against its cool, so the two are told apart by silhouette before colour.
+
+    The indicator is cut out of the disc rather than drawn on top of it, which is what makes the
+    mark work on a light taskbar and a dark one without being drawn twice: the slot shows whatever
+    is behind it, and cannot be the wrong colour against either.
+
+    Three earlier attempts are recorded so they are not repeated. A ball on a vertical track reads
+    as a light bulb. A crossbar on that track reads as a plus sign. A single blade with nothing
+    around it reads as a croissant. All three were judged at 16 pixels, which is the only size that
+    gets a vote.
+  -->
+  <mask id="indicator">
+    <rect width="16" height="16" fill="white" />
+    <path d="M9.090 6.444 L11.040 3.658" fill="none" stroke="black" stroke-width="2.4" stroke-linecap="round" />
+  </mask>
+
+  <circle cx="8" cy="8" r="6.7" fill="#F08A24" mask="url(#indicator)" />
+</svg>

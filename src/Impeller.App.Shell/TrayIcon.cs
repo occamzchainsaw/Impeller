@@ -1,5 +1,6 @@
 using H.NotifyIcon;
 using Impeller.App.ViewModels.Engine;
+using Impeller.Platform.Windows;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
@@ -36,16 +37,18 @@ public sealed class TrayIcon : IDisposable
         _window = window;
         _connection = connection;
 
-        var show = new MenuFlyoutItem { Text = "Show Impeller" };
-        show.Click += (_, _) => Show();
-
-        var exit = new MenuFlyoutItem { Text = "Exit" };
-        exit.Click += (_, _) => Exit();
+        // Commands, not Click handlers. H.NotifyIcon's default menu mode does not show this
+        // MenuFlyout: it reads the items and builds a native Win32 menu, whose selection handler
+        // does exactly one thing - execute the item's Command. A Click handler on a MenuFlyoutItem
+        // is never raised by anything, so both of these did nothing at all.
+        var show = new MenuFlyoutItem { Text = "Show Impeller", Command = new ShowCommand(Show) };
+        var exit = new MenuFlyoutItem { Text = "Exit", Command = new ShowCommand(Exit) };
 
         _icon = new TaskbarIcon
         {
             ToolTipText = "Impeller",
             ContextFlyout = new MenuFlyout { Items = { show, new MenuFlyoutSeparator(), exit } },
+            Icon = LoadIcon(),
         };
 
         _icon.LeftClickCommand = new ShowCommand(Show);
@@ -107,6 +110,31 @@ public sealed class TrayIcon : IDisposable
     /// </remarks>
     private void UpdateToolTip() =>
         _icon.ToolTipText = $"Impeller — {_connection.StatusMessage}";
+
+    /// <summary>
+    /// The mark, at whatever size this desktop wants it.
+    /// </summary>
+    /// <remarks>
+    /// Without an icon the notification area draws the placeholder glyph - a square with a circle
+    /// and a cross through it - which is what a program shows when it has no image at all. The
+    /// tooltip was doing the entire job of identifying this app.
+    /// </remarks>
+    private static System.Drawing.Icon? LoadIcon()
+    {
+        try
+        {
+            var (width, height) = NotificationArea.IconSize;
+            var path = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
+
+            return new System.Drawing.Icon(path, width, height);
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or ArgumentException)
+        {
+            // A missing or unreadable icon file is a cosmetic failure. Losing the tray icon
+            // entirely over it would not be.
+            return null;
+        }
+    }
 
     /// <summary>A command with no state, for the icon's own click.</summary>
     private sealed class ShowCommand(Action show) : System.Windows.Input.ICommand

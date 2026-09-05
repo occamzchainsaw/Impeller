@@ -10,6 +10,12 @@
     <UseWinUI>true</UseWinUI>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <!--
+      Without this the executable carries no icon at all, so Explorer, the taskbar and Alt+Tab all
+      fall back to the generic one. Assets\AppIcon.ico is the same file the window and the
+      notification area load at runtime.
+    -->
+    <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
+    <!--
       No <Platforms> list. With one, a solution-level build picks the solution's default
       platform and quietly produces an x86 shell, while building this project alone produces
       x64. The runtime identifier follows the build machine instead, and a cross-architecture
