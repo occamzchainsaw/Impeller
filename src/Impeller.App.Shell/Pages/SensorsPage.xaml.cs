@@ -1,5 +1,7 @@
-﻿using Impeller.App.ViewModels;
+﻿using Impeller.App.Shell.Controls;
+using Impeller.App.ViewModels;
 using Impeller.App.ViewModels.Sensors;
+using Impeller.Core.Abstractions;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Input;
@@ -21,12 +23,19 @@ public sealed partial class SensorsPage : Page
     {
         InitializeComponent();
 
+        ViewModel.Compose = ComposeAsync;
+        ViewModel.Confirm = ConfirmAsync;
+
         Loaded += async (_, _) => await ViewModel.LoadAsync().ConfigureAwait(true);
         Unloaded += (_, _) => ViewModel.Dispose();
     }
 
     /// <summary>The page's view model, pulled from the container because WinUI builds pages itself.</summary>
     public SensorsViewModel ViewModel { get; } = App.GetService<SensorsViewModel>();
+
+    /// <summary>Shown when the condition holds.</summary>
+    public static Visibility When(bool condition) =>
+        condition ? Visibility.Visible : Visibility.Collapsed;
 
     /// <summary>What the hardware calls it and where it lives, for a tooltip.</summary>
     public static string Where(string fullName, string path) =>
@@ -134,5 +143,91 @@ public sealed partial class SensorsPage : Page
             // handler is a closed application, and this shell has already done that once.
             return false;
         }
+    }
+
+    private async void OnAddMix(object sender, RoutedEventArgs e) =>
+        await ViewModel.AddCommand.ExecuteAsync(CustomSensorKind.Mix);
+
+    private async void OnAddOffset(object sender, RoutedEventArgs e) =>
+        await ViewModel.AddCommand.ExecuteAsync(CustomSensorKind.Offset);
+
+    private async void OnAddAverage(object sender, RoutedEventArgs e) =>
+        await ViewModel.AddCommand.ExecuteAsync(CustomSensorKind.TimeAverage);
+
+    private async void OnAddFile(object sender, RoutedEventArgs e) =>
+        await ViewModel.AddCommand.ExecuteAsync(CustomSensorKind.File);
+
+    private async void OnEditCustom(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: SensorItemViewModel item })
+        {
+            await ViewModel.EditCommand.ExecuteAsync(item.Id);
+        }
+    }
+
+    private async void OnDeleteCustom(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: SensorItemViewModel item })
+        {
+            await ViewModel.DeleteCommand.ExecuteAsync(item.Id);
+        }
+    }
+
+    /// <summary>
+    /// Puts a computed sensor's form in front of the user and reports whether they kept it.
+    /// </summary>
+    /// <remarks>
+    /// The primary button follows <c>CanSave</c>, so a sensor with no name or nothing to read
+    /// cannot be saved rather than being saved and then refused by the engine.
+    /// </remarks>
+    private async Task<bool> ComposeAsync(CustomSensorEditorViewModel editor)
+    {
+        var panel = new CustomSensorPanel(editor);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = editor.Title,
+            Content = panel,
+            PrimaryButtonText = editor.IsNew ? "Add it" : "Save",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            IsPrimaryButtonEnabled = editor.CanSave,
+        };
+
+        void Follow(object? _, System.ComponentModel.PropertyChangedEventArgs args)
+        {
+            if (args.PropertyName == nameof(CustomSensorEditorViewModel.CanSave))
+            {
+                dialog.IsPrimaryButtonEnabled = editor.CanSave;
+            }
+        }
+
+        editor.PropertyChanged += Follow;
+
+        try
+        {
+            return await Dialogs.ShowAsync(dialog) == ContentDialogResult.Primary;
+        }
+        finally
+        {
+            editor.PropertyChanged -= Follow;
+        }
+    }
+
+    /// <summary>Asks before removing something, because removing it changes what curves read.</summary>
+    private async Task<bool> ConfirmAsync(string title, string message)
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = title,
+            Content = message,
+            PrimaryButtonText = "Delete",
+            CloseButtonText = "Keep it",
+            DefaultButton = ContentDialogButton.Close,
+        };
+
+        return await Dialogs.ShowAsync(dialog) == ContentDialogResult.Primary;
     }
 }

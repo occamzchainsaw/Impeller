@@ -31,15 +31,37 @@
                 Text="{x:Bind local:SensorsPage.Showing(ViewModel.Tree.VisibleCount), Mode=OneWay}" />
         </Grid>
 
-        <!--
-            A search box rather than a scroll: 193 rows is not a list anyone reads through. Typing
-            opens the hardware that matched, and clearing closes it again.
-        -->
-        <AutoSuggestBox
-            Grid.Row="1"
-            PlaceholderText="Search for a sensor, or the hardware it is on"
-            QueryIcon="Find"
-            Text="{x:Bind ViewModel.Tree.Search, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+        <Grid Grid.Row="1" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <!--
+                A search box rather than a scroll: 193 rows is not a list anyone reads through.
+                Typing opens the hardware that matched, and clearing closes it again.
+            -->
+            <AutoSuggestBox
+                PlaceholderText="Search for a sensor, or the hardware it is on"
+                QueryIcon="Find"
+                Text="{x:Bind ViewModel.Tree.Search, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+            <!--
+                Sensors Impeller works out for itself, from ones the machine reports. The engine has
+                computed these all along and the importer brings FanControl's across; this is where
+                one gets made.
+            -->
+            <DropDownButton Grid.Column="1" Content="New sensor">
+                <DropDownButton.Flyout>
+                    <MenuFlyout Placement="Bottom">
+                        <MenuFlyoutItem Click="OnAddMix" Text="Mix — several sensors combined" />
+                        <MenuFlyoutItem Click="OnAddOffset" Text="Offset — one sensor, shifted" />
+                        <MenuFlyoutItem Click="OnAddAverage" Text="Average — one sensor, smoothed over time" />
+                        <MenuFlyoutItem Click="OnAddFile" Text="File — a number read from a file" />
+                    </MenuFlyout>
+                </DropDownButton.Flyout>
+            </DropDownButton>
+        </Grid>
 
         <ScrollViewer Grid.Row="2">
             <ItemsControl ItemsSource="{x:Bind ViewModel.Tree.Groups}">
@@ -57,6 +79,7 @@
                                         <Grid Padding="0,4,0,4" ColumnSpacing="12">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
@@ -89,6 +112,27 @@
                                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                                 Text="{x:Bind KindText}"
                                                 TextAlignment="Right" />
+
+                                            <!--
+                                                Only on the sensors the user made. Hardware is not
+                                                something Impeller can offer to delete.
+                                            -->
+                                            <StackPanel
+                                                Grid.Column="3"
+                                                Orientation="Horizontal"
+                                                Spacing="4"
+                                                Visibility="{x:Bind local:SensorsPage.When(IsCustom)}">
+                                                <Button
+                                                    Padding="8,2,8,2"
+                                                    Click="OnEditCustom"
+                                                    Content="Edit"
+                                                    Tag="{x:Bind}" />
+                                                <Button
+                                                    Padding="8,2,8,2"
+                                                    Click="OnDeleteCustom"
+                                                    Content="Delete"
+                                                    Tag="{x:Bind}" />
+                                            </StackPanel>
                                         </Grid>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>

@@ -108,7 +108,7 @@ public sealed partial class CurvesPage : Page
             DefaultButton = ContentDialogButton.Close,
         };
 
-        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+        return await Dialogs.ShowAsync(dialog) == ContentDialogResult.Primary;
     }
 
     private void OnViewModelChanged(object? sender, PropertyChangedEventArgs e)

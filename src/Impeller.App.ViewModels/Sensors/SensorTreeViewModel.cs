@@ -33,6 +33,21 @@ public sealed partial class SensorItemViewModel(
     public bool IsRenaming { get; set; }
 
     /// <summary>
+    /// Whether this row is ticked, where several may be.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="IsSelected"/> rather than reusing it. Picking one sensor and
+    /// gathering several are different questions - a curve reads one temperature, a mix combines
+    /// four - and a single flag doing both would make "the selection" mean two things.
+    /// </remarks>
+    [ObservableProperty]
+    public partial bool IsChecked { get; set; }
+
+    /// <summary>Whether the user made this one, and so can edit or delete it.</summary>
+    public bool IsCustom { get; } =
+        string.Equals(descriptor.ProviderId, ProviderIds.Derived, StringComparison.Ordinal);
+
+    /// <summary>
     /// Whether this is the row a picker has chosen.
     /// </summary>
     /// <remarks>
@@ -181,6 +196,16 @@ public sealed partial class SensorTreeViewModel : ObservableObject
     private readonly List<SensorDescriptor> _all = [];
     private readonly Dictionary<SensorId, SensorItemViewModel> _items = [];
 
+    /// <summary>
+    /// The sensors ticked, in the order they were ticked.
+    /// </summary>
+    /// <remarks>
+    /// A list rather than a set, and the order is not decoration: <see cref="MixFunction.Difference"/>
+    /// is the first source minus the rest, so which one is first is the difference between "CPU
+    /// minus ambient" and "ambient minus CPU".
+    /// </remarks>
+    private readonly List<SensorId> _checked = [];
+
     /// <summary>The groups the user opened, by key, so a rebuild does not shut them again.</summary>
     /// <remarks>
     /// Every rebuild replaces the group objects, so their state has to live somewhere that outlives
@@ -203,6 +228,43 @@ public sealed partial class SensorTreeViewModel : ObservableObject
 
     /// <summary>Whether writable controls are offered as well as readable sensors.</summary>
     public bool IncludeControls { get; set; } = true;
+
+    /// <summary>Sensors this tree will not offer at all.</summary>
+    /// <remarks>
+    /// A computed sensor being edited excludes itself, so the most obvious way to build one that
+    /// reads itself is simply not on the page. The validator catches the rest.
+    /// </remarks>
+    public IReadOnlyCollection<SensorId> Excluded { get; set; } = [];
+
+    /// <summary>The sensors ticked, in the order they were ticked.</summary>
+    public IReadOnlyList<SensorId> Checked => _checked;
+
+    /// <summary>Raised when the ticks change, so an editor can follow them.</summary>
+    public event EventHandler? CheckedChanged;
+
+    /// <summary>Sets the ticks, keeping the order given.</summary>
+    public void SetChecked(IEnumerable<SensorId> ids)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+
+        _checked.Clear();
+
+        foreach (var id in ids)
+        {
+            if (!_checked.Contains(id))
+            {
+                _checked.Add(id);
+            }
+        }
+
+        foreach (var item in _items.Values)
+        {
+            item.IsChecked = _checked.Contains(item.Id);
+        }
+
+        RevealChecked();
+        CheckedChanged?.Invoke(this, EventArgs.Empty);
+    }
 
     /// <summary>What the user typed. Matched against the full name and the hardware path.</summary>
     [ObservableProperty]
@@ -290,6 +352,11 @@ public sealed partial class SensorTreeViewModel : ObservableObject
             group.PropertyChanged -= OnGroupChanged;
         }
 
+        foreach (var item in _items.Values)
+        {
+            item.PropertyChanged -= OnItemChanged;
+        }
+
         Groups.Clear();
         _items.Clear();
 
@@ -309,7 +376,14 @@ public sealed partial class SensorTreeViewModel : ObservableObject
 
             foreach (var descriptor in group.OrderBy(sensor => sensor.Kind).ThenBy(sensor => sensor.Name, StringComparer.OrdinalIgnoreCase))
             {
-                var item = new SensorItemViewModel(descriptor, Rename);
+                // Ticked before it is listened to, so restoring a tick is not mistaken for the
+                // user making one - the same trap the groups' expansion has.
+                var item = new SensorItemViewModel(descriptor, Rename)
+                {
+                    IsChecked = _checked.Contains(descriptor.Id),
+                };
+
+                item.PropertyChanged += OnItemChanged;
                 view.Sensors.Add(item);
                 _items[descriptor.Id] = item;
             }
@@ -332,6 +406,8 @@ public sealed partial class SensorTreeViewModel : ObservableObject
             selected.IsSelected = true;
             Reveal(selected);
         }
+
+        RevealChecked();
     }
 
     /// <summary>
@@ -352,6 +428,52 @@ public sealed partial class SensorTreeViewModel : ObservableObject
                 return;
             }
         }
+    }
+
+    /// <summary>
+    /// Opens every group holding a ticked sensor.
+    /// </summary>
+    /// <remarks>
+    /// The same argument the selection makes. A sensor already in the mix, sitting behind a closed
+    /// group, reads as one that is not in the mix.
+    /// </remarks>
+    private void RevealChecked()
+    {
+        foreach (var group in Groups)
+        {
+            foreach (var row in group.Sensors)
+            {
+                if (row.IsChecked)
+                {
+                    group.IsExpanded = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    /// <summary>Records the ticks, in the order they are made.</summary>
+    private void OnItemChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(SensorItemViewModel.IsChecked)
+            || sender is not SensorItemViewModel item)
+        {
+            return;
+        }
+
+        if (item.IsChecked)
+        {
+            if (!_checked.Contains(item.Id))
+            {
+                _checked.Add(item.Id);
+            }
+        }
+        else
+        {
+            _checked.Remove(item.Id);
+        }
+
+        CheckedChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>Records the groups the user opens and closes, so their choice survives a rebuild.</summary>
@@ -376,6 +498,11 @@ public sealed partial class SensorTreeViewModel : ObservableObject
     private bool Matches(SensorDescriptor sensor)
     {
         if (OnlyKind is { } kind && sensor.Kind != kind)
+        {
+            return false;
+        }
+
+        if (Excluded.Contains(sensor.Id))
         {
             return false;
         }

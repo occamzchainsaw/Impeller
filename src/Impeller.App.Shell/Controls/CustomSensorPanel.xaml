@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="Impeller.App.Shell.Controls.CustomSensorPanel"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Impeller.App.Shell.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:sensors="using:Impeller.App.ViewModels.Sensors"
+    Width="460"
+    mc:Ignorable="d">
+
+    <!--
+        A fixed width, and narrower than it looks. A ContentDialog is capped at 548 and takes its
+        padding out of that, so a panel sized to the cap has its right-hand edge quietly cut off -
+        which showed up as a summary reading "2 sens".
+    -->
+
+    <StackPanel Spacing="14">
+
+        <TextBox
+            Header="Name"
+            PlaceholderText="Hottest of CPU and GPU"
+            Text="{x:Bind Editor.Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+        <!--  Mix: how the readings are folded into one.  -->
+        <StackPanel Spacing="10" Visibility="{x:Bind controls:CustomSensorPanel.When(Editor.IsMix)}">
+            <ComboBox
+                HorizontalAlignment="Stretch"
+                Header="Combine them by taking"
+                ItemsSource="{x:Bind sensors:CustomSensorEditorViewModel.Functions}"
+                SelectedItem="{x:Bind Editor.Function, Mode=TwoWay}" />
+
+            <CheckBox
+                Content="Keep reporting if one of them stops answering"
+                IsChecked="{x:Bind Editor.AllowMissingSource, Mode=TwoWay}"
+                ToolTipService.ToolTip="Off by default. A 'hottest of CPU and GPU' that carries on after the GPU goes quiet is reporting something other than what it claims." />
+        </StackPanel>
+
+        <!--  Offset: one sensor, shifted or scaled.  -->
+        <StackPanel Spacing="10" Visibility="{x:Bind controls:CustomSensorPanel.When(Editor.IsOffset)}">
+            <NumberBox
+                Header="Shift it by"
+                SpinButtonPlacementMode="Compact"
+                Value="{x:Bind Editor.Offset, Mode=TwoWay}" />
+
+            <CheckBox
+                Content="That is a percentage of the reading, not an amount added to it"
+                IsChecked="{x:Bind Editor.Proportional, Mode=TwoWay}" />
+        </StackPanel>
+
+        <!--  Average: one sensor, smoothed.  -->
+        <StackPanel Visibility="{x:Bind controls:CustomSensorPanel.When(Editor.IsTimeAverage)}">
+            <NumberBox
+                Header="Average over (s)"
+                Minimum="1"
+                SpinButtonPlacementMode="Compact"
+                Value="{x:Bind Editor.WindowSeconds, Mode=TwoWay}" />
+        </StackPanel>
+
+        <!--  File: a number from somewhere Impeller cannot see for itself.  -->
+        <StackPanel Spacing="10" Visibility="{x:Bind controls:CustomSensorPanel.When(Editor.IsFile)}">
+            <TextBox
+                Header="Read the number from"
+                PlaceholderText="C:\path\to\value.txt"
+                Text="{x:Bind Editor.Path, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+            <ComboBox
+                HorizontalAlignment="Stretch"
+                Header="What that number is"
+                ItemsSource="{x:Bind sensors:CustomSensorEditorViewModel.Measures}"
+                SelectedItem="{x:Bind Editor.Measure, Mode=TwoWay}" />
+
+            <TextBlock
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Text="The file should hold one number and nothing else. It is read every tick and never written to."
+                TextWrapping="Wrap" />
+        </StackPanel>
+
+        <!--  The sensors it reads. Temperatures only, as the curve editor's picker is.  -->
+        <StackPanel Spacing="8" Visibility="{x:Bind controls:CustomSensorPanel.When(Editor.ReadsSensors)}">
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="{x:Bind controls:CustomSensorPanel.Reads(Editor.ReadsSeveral)}" />
+
+                <TextBlock
+                    Grid.Column="1"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="{x:Bind Editor.SourcesText, Mode=OneWay}" />
+            </Grid>
+
+            <AutoSuggestBox
+                PlaceholderText="Search temperatures"
+                QueryIcon="Find"
+                Text="{x:Bind Editor.Sources.Search, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+            <ScrollViewer Height="260">
+                <ItemsControl ItemsSource="{x:Bind Editor.Sources.Groups}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="sensors:SensorGroupViewModel">
+                            <Expander
+                                Margin="0,0,0,4"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Stretch"
+                                Header="{x:Bind Name}"
+                                IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}">
+                                <ItemsControl ItemsSource="{x:Bind Sensors}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="sensors:SensorItemViewModel">
+                                            <CheckBox
+                                                Content="{x:Bind controls:CustomSensorPanel.Describe(Name, ValueText), Mode=OneWay}"
+                                                IsChecked="{x:Bind IsChecked, Mode=TwoWay}" />
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </Expander>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+
+            <TextBlock
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Text="Order matters for 'the first, minus the rest'. They are taken in the order you tick them."
+                TextWrapping="Wrap"
+                Visibility="{x:Bind controls:CustomSensorPanel.When(Editor.ReadsSeveral)}" />
+        </StackPanel>
+    </StackPanel>
+</UserControl>
