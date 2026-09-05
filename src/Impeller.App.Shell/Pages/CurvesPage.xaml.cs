@@ -1,28 +1,19 @@
-using System.ComponentModel;
+using Impeller.App.Shell.Controls;
 using Impeller.App.ViewModels;
 using Impeller.App.ViewModels.Curves;
-using Impeller.App.ViewModels.Sensors;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
 namespace Impeller.App.Shell.Pages;
 
 /// <summary>
-/// The curve editor: a list on the left, and whichever panel the selected curve needs on the right.
+/// The curves in the configuration, and what each of them is asking for.
 /// </summary>
 /// <remarks>
-/// <para>
-/// One panel per kind. The shared four-box grid this replaced showed every kind the same four
-/// numbers and let the headers carry the difference, which meant a flat curve — a constant — was
-/// offered a lower and an upper value, a mix curve was offered a temperature range it does not
-/// read, and a trigger's thresholds were called "lower" and "upper" rather than idle and load.
-/// </para>
-/// <para>
-/// The boxes bind two-way straight to the editor. They used to be named controls filled and read
-/// back by hand, because a two-way binding fired while the panel was being replaced and wrote the
-/// old curve's numbers into the new one — which is a real hazard, and the reason the editor is now
-/// replaced wholesale rather than refilled in place.
-/// </para>
+/// A list, with the editing done on a panel that opens over it — the shape the Sensors page already
+/// uses for computed sensors. It used to be a list beside an editor driven by the selection, which
+/// made a curve that had been added and never saved something the page had to take back out of the
+/// list when the selection moved; doing that mid-selection closed the window.
 /// </remarks>
 public sealed partial class CurvesPage : Page
 {
@@ -30,64 +21,78 @@ public sealed partial class CurvesPage : Page
     {
         InitializeComponent();
 
-        Canvas.CurveChanged += (_, _) => ViewModel.IsDirty = true;
-        ViewModel.PropertyChanged += OnViewModelChanged;
+        ViewModel.Compose = ComposeAsync;
         ViewModel.Confirm = ConfirmAsync;
 
         Loaded += async (_, _) => await ViewModel.LoadAsync().ConfigureAwait(true);
-
-        Unloaded += (_, _) =>
-        {
-            ViewModel.PropertyChanged -= OnViewModelChanged;
-            ViewModel.Dispose();
-        };
+        Unloaded += (_, _) => ViewModel.Dispose();
     }
 
     /// <summary>The page's view model, pulled from the container because WinUI builds pages itself.</summary>
     public CurvesViewModel ViewModel { get; } = App.GetService<CurvesViewModel>();
 
-    /// <summary>The ways a mix can combine its inputs, for the one combo box that offers them.</summary>
-    public static IReadOnlyList<MixFunctionChoice> MixFunctions => CurveEditorViewModel.MixFunctions;
-
-    /// <summary>Shown when nothing is selected.</summary>
-    public static Visibility WhenNull(object? value) =>
-        value is null ? Visibility.Visible : Visibility.Collapsed;
-
-    /// <summary>Shown when something is.</summary>
-    public static Visibility WhenNotNull(object? value) =>
-        value is null ? Visibility.Collapsed : Visibility.Visible;
-
     /// <summary>Shown when the condition holds.</summary>
     public static Visibility When(bool condition) =>
         condition ? Visibility.Visible : Visibility.Collapsed;
 
-    /// <summary>Shown when it does not.</summary>
-    public static Visibility WhenNot(bool condition) =>
-        condition ? Visibility.Collapsed : Visibility.Visible;
+    private async void OnAddGraph(object sender, RoutedEventArgs e) => await Add(CurveEditorKind.Graph);
 
-    /// <summary>What kind of curve is open, for the strip above the panel.</summary>
-    public static string KindLabel(CurveEditorViewModel? editor) => editor?.Kind switch
+    private async void OnAddLinear(object sender, RoutedEventArgs e) => await Add(CurveEditorKind.Linear);
+
+    private async void OnAddAuto(object sender, RoutedEventArgs e) => await Add(CurveEditorKind.Auto);
+
+    private async void OnAddTrigger(object sender, RoutedEventArgs e) => await Add(CurveEditorKind.Trigger);
+
+    private async void OnAddFlat(object sender, RoutedEventArgs e) => await Add(CurveEditorKind.Flat);
+
+    private async void OnAddMix(object sender, RoutedEventArgs e) => await Add(CurveEditorKind.Mix);
+
+    private async void OnAddSync(object sender, RoutedEventArgs e) => await Add(CurveEditorKind.Sync);
+
+    private Task Add(CurveEditorKind kind) => ViewModel.AddCommand.ExecuteAsync(kind);
+
+    private async void OnEditCurve(object sender, RoutedEventArgs e)
     {
-        CurveEditorKind.Flat => "Flat curve",
-        CurveEditorKind.Linear => "Linear curve",
-        CurveEditorKind.Graph => "Graph curve",
-        CurveEditorKind.Mix => "Mix curve",
-        CurveEditorKind.Sync => "Sync curve",
-        CurveEditorKind.Trigger => "Trigger curve",
-        CurveEditorKind.Auto => "Auto curve",
-        _ => string.Empty,
-    };
+        if (sender is Button { Tag: CurveListItemViewModel item })
+        {
+            await ViewModel.EditCommand.ExecuteAsync(item.Id);
+        }
+    }
 
-    /// <summary>The subtitle under a curve in the list: what it is, and what it drives.</summary>
-    public static string DescribeCurve(string kind, int users) => users switch
+    private async void OnDeleteCurve(object sender, RoutedEventArgs e)
     {
-        0 => $"{kind} · not used",
-        1 => $"{kind} · drives 1 fan",
-        _ => $"{kind} · drives {users} fans",
-    };
+        if (sender is Button { Tag: CurveListItemViewModel item })
+        {
+            await ViewModel.DeleteCommand.ExecuteAsync(item.Id);
+        }
+    }
 
-    /// <summary>A sensor with its current reading, so the choice can be made on live values.</summary>
-    public static string DescribeSensor(string name, string value) => $"{name}   {value}";
+    /// <summary>
+    /// Puts a curve's panel in front of the user and reports whether they kept it.
+    /// </summary>
+    /// <remarks>
+    /// The dialog's own width cap is 548, which is not enough for a canvas worth dragging points
+    /// on, so it is raised for this one. Overriding the resource on the dialog rather than in the
+    /// application's dictionary keeps every other dialog the size it should be.
+    /// </remarks>
+    private async Task<bool> ComposeAsync(CurveEditorViewModel editor)
+    {
+        var panel = new CurveEditorPanel(editor);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = editor.IsNew ? "New curve" : "Edit curve",
+            Content = panel,
+            PrimaryButtonText = "Save",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+
+        dialog.Resources["ContentDialogMaxWidth"] = 900d;
+
+        return await Dialogs.ShowAsync(dialog) == ContentDialogResult.Primary;
+    }
 
     /// <summary>
     /// Asks before doing something that cannot be undone.
@@ -110,37 +115,4 @@ public sealed partial class CurvesPage : Page
 
         return await Dialogs.ShowAsync(dialog) == ContentDialogResult.Primary;
     }
-
-    private void OnViewModelChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName == nameof(CurvesViewModel.Editor))
-        {
-            Canvas.Editor = ViewModel.Editor;
-        }
-    }
-
-    /// <summary>Records which sensor the curve should read.</summary>
-    private void OnSensorChosen(object sender, RoutedEventArgs e)
-    {
-        if (sender is RadioButton { DataContext: SensorItemViewModel sensor })
-        {
-            ViewModel.ChooseSensor(sensor);
-        }
-    }
-
-    private void OnAddGraph(object sender, RoutedEventArgs e) => Add(CurveEditorKind.Graph);
-
-    private void OnAddLinear(object sender, RoutedEventArgs e) => Add(CurveEditorKind.Linear);
-
-    private void OnAddAuto(object sender, RoutedEventArgs e) => Add(CurveEditorKind.Auto);
-
-    private void OnAddTrigger(object sender, RoutedEventArgs e) => Add(CurveEditorKind.Trigger);
-
-    private void OnAddFlat(object sender, RoutedEventArgs e) => Add(CurveEditorKind.Flat);
-
-    private void OnAddMix(object sender, RoutedEventArgs e) => Add(CurveEditorKind.Mix);
-
-    private void OnAddSync(object sender, RoutedEventArgs e) => Add(CurveEditorKind.Sync);
-
-    private void Add(CurveEditorKind kind) => ViewModel.AddCommand.Execute(kind);
 }

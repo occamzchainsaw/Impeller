@@ -31,8 +31,27 @@ namespace Impeller.App.Shell.Controls;
 /// </remarks>
 public sealed class CurveCanvas : Canvas
 {
-    /// <summary>Room around the plot for the axis labels.</summary>
-    private const double Padding = 28;
+    /// <summary>
+    /// Room around the plot, per edge, for the axis labels.
+    /// </summary>
+    /// <remarks>
+    /// Four numbers rather than one. The old single value said it was "room for the axis labels"
+    /// and there were none - so the left edge had the same gap as the right, where nothing is
+    /// written, and neither had enough for a number.
+    /// </remarks>
+    private const double PadLeft = 44;
+
+    /// <summary>See <see cref="PadLeft"/>.</summary>
+    private const double PadRight = 18;
+
+    /// <summary>See <see cref="PadLeft"/>.</summary>
+    /// <remarks>
+    /// Enough for the caption to sit above the topmost number rather than on top of it.
+    /// </remarks>
+    private const double PadTop = 28;
+
+    /// <summary>See <see cref="PadLeft"/>.</summary>
+    private const double PadBottom = 34;
 
     /// <summary>How wide a point is, and how near the pointer has to be to grab one.</summary>
     private const double ThumbSize = 12;
@@ -44,6 +63,23 @@ public sealed class CurveCanvas : Canvas
     private readonly List<Ellipse> _thumbs = [];
     private readonly List<Line> _grid = [];
     private readonly List<TextBlock> _labels = [];
+    private readonly List<TextBlock> _ticks = [];
+
+    private readonly TextBlock _acrossCaption = new()
+    {
+        Text = "temperature (°C)",
+        FontSize = 11,
+        Opacity = 0.65,
+        IsHitTestVisible = false,
+    };
+
+    private readonly TextBlock _upCaption = new()
+    {
+        Text = "fan (%)",
+        FontSize = 11,
+        Opacity = 0.65,
+        IsHitTestVisible = false,
+    };
 
     private CurvePointViewModel? _dragging;
 
@@ -60,6 +96,8 @@ public sealed class CurveCanvas : Canvas
         MinHeight = 220;
 
         Children.Add(_line);
+        Children.Add(_acrossCaption);
+        Children.Add(_upCaption);
 
         SizeChanged += (_, _) => Redraw();
         PointerPressed += OnPointerPressed;
@@ -195,7 +233,7 @@ public sealed class CurveCanvas : Canvas
 
     private void Redraw()
     {
-        if (ActualWidth <= Padding * 2 || ActualHeight <= Padding * 2)
+        if (ActualWidth <= PadLeft + PadRight || ActualHeight <= PadTop + PadBottom)
         {
             return;
         }
@@ -220,14 +258,26 @@ public sealed class CurveCanvas : Canvas
         DrawThumbs(editor);
     }
 
+    /// <summary>
+    /// The grid, and the numbers that say what it measures.
+    /// </summary>
+    /// <remarks>
+    /// A grid with no numbers on it is decoration: it says the graph has divisions without saying
+    /// what any of them are, so the shape can be read but not the values, and the two axes cannot
+    /// be told apart at a glance.
+    /// </remarks>
     private void DrawGrid()
     {
-        var wanted = 0;
+        var lines = 0;
+        var ticks = 0;
 
         for (var duty = 0.0; duty <= 100.0; duty += GridStep * 2)
         {
             var y = ToY(duty);
-            Place(wanted++, Padding, y, ActualWidth - Padding, y);
+            Place(lines++, PadLeft, y, ActualWidth - PadRight, y);
+
+            // Right-aligned against the plot, so a two- and a three-digit number line up.
+            Tick(ticks++, $"{duty:0}", PadLeft - 8, y, Align.Right);
         }
 
         if (Editor is { } editor)
@@ -235,15 +285,71 @@ public sealed class CurveCanvas : Canvas
             for (var input = editor.AxisMinimum; input <= editor.AxisMaximum; input += (float)GridStep * 2)
             {
                 var x = ToX(editor, input);
-                Place(wanted++, x, Padding, x, ActualHeight - Padding);
+                Place(lines++, x, PadTop, x, ActualHeight - PadBottom);
+                Tick(ticks++, $"{input:0}", x, ActualHeight - PadBottom + 6, Align.Centre);
             }
         }
 
+        _acrossCaption.Visibility = Visibility.Visible;
+        SetLeft(_acrossCaption, Math.Max(ActualWidth - PadRight - 100, PadLeft));
+        SetTop(_acrossCaption, ActualHeight - 17);
+
+        _upCaption.Visibility = Visibility.Visible;
+        SetLeft(_upCaption, 2);
+        SetTop(_upCaption, 0);
+
         // Grid lines are reused rather than recreated on every pointer move, which happens often
         // enough while dragging that allocating a fresh visual tree each time is visible.
-        for (var i = wanted; i < _grid.Count; i++)
+        for (var i = lines; i < _grid.Count; i++)
         {
             _grid[i].Visibility = Visibility.Collapsed;
+        }
+
+        for (var i = ticks; i < _ticks.Count; i++)
+        {
+            _ticks[i].Visibility = Visibility.Collapsed;
+        }
+    }
+
+    /// <summary>Where a tick label sits relative to the point it marks.</summary>
+    private enum Align
+    {
+        /// <summary>Ending at the point, for the numbers up the left-hand side.</summary>
+        Right,
+
+        /// <summary>Centred on it, for the numbers along the bottom.</summary>
+        Centre,
+    }
+
+    /// <summary>One number beside the grid line it belongs to.</summary>
+    private void Tick(int index, string text, double x, double y, Align align)
+    {
+        while (_ticks.Count <= index)
+        {
+            var label = new TextBlock { FontSize = 11, Opacity = 0.65, IsHitTestVisible = false };
+            _ticks.Add(label);
+            Children.Add(label);
+        }
+
+        var tick = _ticks[index];
+        tick.Visibility = Visibility.Visible;
+        tick.Text = text;
+
+        // Measured before placing, because both alignments need to know how wide the text came out
+        // and a TextBlock does not know until it is asked.
+        tick.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+
+        var size = tick.DesiredSize;
+
+        if (align == Align.Right)
+        {
+            SetLeft(tick, x - size.Width);
+            SetTop(tick, y - (size.Height / 2));
+        }
+        else
+        {
+            SetLeft(tick, x - (size.Width / 2));
+            SetTop(tick, y);
         }
     }
 
@@ -347,11 +453,11 @@ public sealed class CurveCanvas : Canvas
     private double ToX(CurveEditorViewModel editor, double input)
     {
         var span = Math.Max(editor.AxisMaximum - editor.AxisMinimum, 1);
-        return Padding + ((input - editor.AxisMinimum) / span * (ActualWidth - (Padding * 2)));
+        return PadLeft + ((input - editor.AxisMinimum) / span * Math.Max(ActualWidth - PadLeft - PadRight, 1));
     }
 
     private double ToY(double duty) =>
-        ActualHeight - Padding - (duty / 100.0 * (ActualHeight - (Padding * 2)));
+        ActualHeight - PadBottom - (duty / 100.0 * Math.Max(ActualHeight - PadTop - PadBottom, 1));
 
     private double ToInput(double x)
     {
@@ -361,15 +467,15 @@ public sealed class CurveCanvas : Canvas
         }
 
         var span = Math.Max(editor.AxisMaximum - editor.AxisMinimum, 1);
-        var plot = Math.Max(ActualWidth - (Padding * 2), 1);
+        var plot = Math.Max(ActualWidth - PadLeft - PadRight, 1);
 
-        return editor.AxisMinimum + ((x - Padding) / plot * span);
+        return editor.AxisMinimum + ((x - PadLeft) / plot * span);
     }
 
     private double ToDuty(double y)
     {
-        var plot = Math.Max(ActualHeight - (Padding * 2), 1);
-        return (ActualHeight - Padding - y) / plot * 100.0;
+        var plot = Math.Max(ActualHeight - PadTop - PadBottom, 1);
+        return (ActualHeight - PadBottom - y) / plot * 100.0;
     }
 
     private void Raise() => CurveChanged?.Invoke(this, EventArgs.Empty);

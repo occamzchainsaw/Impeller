@@ -1,18 +1,16 @@
 using System.Collections.ObjectModel;
-using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Impeller.App.ViewModels.Curves;
 using Impeller.App.ViewModels.Engine;
 using Impeller.App.ViewModels.Notifications;
-using Impeller.App.ViewModels.Sensors;
 using Impeller.Core.Abstractions;
 using Impeller.Core.Abstractions.Configuration;
 using Impeller.Ipc.Contracts;
 
 namespace Impeller.App.ViewModels;
 
-/// <summary>A curve in the list beside the editor.</summary>
+/// <summary>One curve, as a row on the page.</summary>
 public sealed partial class CurveListItemViewModel(CurveDefinition definition) : ObservableObject
 {
     /// <summary>Which curve.</summary>
@@ -38,19 +36,57 @@ public sealed partial class CurveListItemViewModel(CurveDefinition definition) :
     /// <summary>How many controls this curve drives, so deleting one says what it costs.</summary>
     [ObservableProperty]
     public partial int Users { get; set; }
+
+    /// <summary>What it reads, or what it is built from.</summary>
+    [ObservableProperty]
+    public partial string ReadsText { get; set; } = string.Empty;
+
+    /// <summary>
+    /// What it is asking for right now.
+    /// </summary>
+    /// <remarks>
+    /// On the row rather than only inside the editor, so the page answers "which of these is
+    /// actually doing anything" without opening seven of them in turn.
+    /// </remarks>
+    [ObservableProperty]
+    public partial string OutputText { get; set; } = "—";
+
+    /// <summary>The kind and the fans it drives, on one line under the name.</summary>
+    public string Summary => Users switch
+    {
+        0 => $"{Kind} · not used",
+        1 => $"{Kind} · drives 1 fan",
+        var count => $"{Kind} · drives {count} fans",
+    };
+
+    /// <summary>Keeps the line under the name current when the count changes.</summary>
+    partial void OnUsersChanged(int value) => OnPropertyChanged(nameof(Summary));
 }
 
 /// <summary>
 /// Fan curves, their inputs, and which controls they drive.
 /// </summary>
 /// <remarks>
-/// Edits are held here until saved. Sending each change as it happens sounds more responsive and
-/// means dragging a point across a canvas applies twenty intermediate configurations to real fans,
-/// most of them shapes the user was passing through rather than choosing.
+/// <para>
+/// The page is the list; a curve is edited in a panel that opens over it, the way a computed sensor
+/// is. That is not only for consistency. The editor used to sit beside the list and be driven by
+/// the selection, which meant a curve added and never saved had to be taken back out of the list
+/// when the selection moved off it — and removing the item a list is in the middle of changing
+/// selection on makes WinUI ask for an index that no longer exists and close the window. Composing
+/// in a panel means an unsaved curve is never in the list at all, so there is nothing to withdraw.
+/// </para>
+/// <para>
+/// Nothing reaches a fan until the panel is accepted. Sending each change as it happens sounds more
+/// responsive and means dragging a point across a canvas applies twenty intermediate configurations
+/// to real hardware, most of them shapes the user was passing through rather than choosing.
+/// </para>
 /// </remarks>
 public sealed partial class CurvesViewModel(EngineConnection connection, NotificationCenter notifications)
     : EnginePageViewModel(connection, notifications)
 {
+    private CurveEditorViewModel? _open;
+    private CurveDefinition? _built;
+
     /// <inheritdoc />
     public override string Title => "Curves";
 
@@ -58,109 +94,106 @@ public sealed partial class CurvesViewModel(EngineConnection connection, Notific
     public ObservableCollection<CurveListItemViewModel> Curves { get; } = [];
 
     /// <summary>
-    /// How the page asks the user to confirm deleting a curve, or null to delete without asking.
+    /// How the page puts a curve's panel in front of the user, and what they answered.
     /// </summary>
     /// <remarks>
     /// Supplied by the view rather than reached for, because a dialog is a UI-framework thing and
-    /// this project deliberately has none. The message is composed here, where the facts are: which
-    /// curve it is, and how many fans stop being driven by it.
+    /// this project deliberately has none.
     /// </remarks>
+    public Func<CurveEditorViewModel, Task<bool>>? Compose { get; set; }
+
+    /// <summary>How the page asks the user to confirm deleting a curve.</summary>
     public Func<string, string, Task<bool>>? Confirm { get; set; }
 
-    /// <summary>The sensors a curve can read, restricted to temperatures.</summary>
-    public SensorTreeViewModel SensorPicker { get; } = new()
-    {
-        OnlyKind = SensorKind.Temperature,
-        IncludeControls = false,
-    };
-
-    /// <summary>The curve currently open, or null.</summary>
-    [ObservableProperty]
-    public partial CurveListItemViewModel? Selected { get; set; }
-
-    /// <summary>The editor for it.</summary>
-    [ObservableProperty]
-    public partial CurveEditorViewModel? Editor { get; private set; }
-
-    /// <summary>Whether the open curve has unsaved changes.</summary>
-    [ObservableProperty]
-    public partial bool IsDirty { get; set; }
+    /// <summary>Whether there is anything in the list.</summary>
+    public bool IsEmpty => Curves.Count == 0;
 
     /// <summary>
-    /// The sensor the open curve reads, and what it says right now.
+    /// Makes a curve of one kind and offers it for editing.
     /// </summary>
     /// <remarks>
-    /// The line above the picker, so the picker itself can be folded away. A curve editor that
-    /// showed a hundred and ninety-three radio buttons and never said which one was chosen made the
-    /// most important fact on the panel the hardest one to find.
+    /// Nothing is added to the configuration unless the panel is accepted, so a mis-click leaves
+    /// nothing behind and nothing reaches a fan.
     /// </remarks>
-    public string ReadsText => SensorPicker.Selected is { } sensor
-        ? $"{sensor.Name} — {sensor.ValueText}"
-        : "No sensor chosen yet";
-
-    /// <summary>Whether a sensor has been chosen at all.</summary>
-    public bool HasSource => SensorPicker.Selected is not null;
-
-    /// <summary>
-    /// Follows the open editor, so any change to it marks the curve unsaved.
-    /// </summary>
-    /// <remarks>
-    /// One handler rather than an event wired to each of thirty controls. The page binds two-way and
-    /// says nothing about dirtiness; this notices. The two exclusions are the live read-out, which
-    /// changes once a second on its own and would otherwise mark every open curve unsaved within a
-    /// second of opening it.
-    /// </remarks>
-    partial void OnEditorChanged(CurveEditorViewModel? oldValue, CurveEditorViewModel? newValue)
+    [RelayCommand]
+    private async Task AddAsync(CurveEditorKind kind)
     {
-        if (oldValue is not null)
-        {
-            oldValue.PropertyChanged -= OnEditorEdited;
-        }
-
-        if (newValue is not null)
-        {
-            newValue.PropertyChanged += OnEditorEdited;
-        }
-    }
-
-    private void OnEditorEdited(object? sender, PropertyChangedEventArgs e)
-    {
-        if (sender is not CurveEditorViewModel editor
-            || e.PropertyName is nameof(CurveEditorViewModel.LiveOutput)
-                or nameof(CurveEditorViewModel.OutputText))
+        if (Snapshot is not { } snapshot || Compose is null)
         {
             return;
         }
 
-        // The list on the left carries the name, and a rename that only showed up after saving
-        // would leave the user looking at two different names for one curve.
-        if (e.PropertyName == nameof(CurveEditorViewModel.Name) && Selected is { } selected)
+        if (!await OpenAsync(Blank(kind, UnusedName(kind.ToString())), snapshot, isNew: true).ConfigureAwait(true))
         {
-            selected.Name = editor.Name;
+            return;
         }
 
-        IsDirty = true;
+        await SaveAsync(snapshot, _built!, $"Added '{_built!.Name}'.").ConfigureAwait(true);
     }
 
-    /// <inheritdoc />
-    protected override void OnDisposing()
+    /// <summary>Reopens an existing curve.</summary>
+    [RelayCommand]
+    private async Task EditAsync(CurveId id)
     {
-        if (Editor is { } editor)
+        if (Snapshot is not { } snapshot
+            || Compose is null
+            || snapshot.Configuration.Curves.FirstOrDefault(curve => curve.Id == id) is not { } definition)
         {
-            editor.PropertyChanged -= OnEditorEdited;
+            return;
         }
+
+        if (!await OpenAsync(definition, snapshot, isNew: false).ConfigureAwait(true))
+        {
+            return;
+        }
+
+        await SaveAsync(snapshot, _built!, "Saved.").ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// Deletes a curve, and unbinds anything that was using it.
+    /// </summary>
+    /// <remarks>
+    /// The unbinding is the point. A control left pointing at a curve that no longer exists makes
+    /// the whole configuration fail validation, so deleting one curve would otherwise refuse to
+    /// save until the user had found every control that referenced it.
+    /// </remarks>
+    [RelayCommand]
+    private async Task DeleteAsync(CurveId id)
+    {
+        if (Snapshot is not { } snapshot
+            || Curves.FirstOrDefault(curve => curve.Id == id) is not { } item)
+        {
+            return;
+        }
+
+        if (Confirm is { } confirm
+            && !await confirm($"Delete '{item.Name}'?", DeletionCost(item)).ConfigureAwait(true))
+        {
+            return;
+        }
+
+        var configuration = snapshot.Configuration with
+        {
+            Curves = [.. snapshot.Configuration.Curves.Where(curve => curve.Id != id)],
+            Controls =
+            [
+                .. snapshot.Configuration.Controls.Select(binding =>
+                    binding.CurveId == id ? binding with { CurveId = CurveId.None, Enabled = false } : binding),
+            ],
+        };
+
+        await ApplyAsync(configuration, $"Deleted '{item.Name}'.").ConfigureAwait(true);
     }
 
     /// <inheritdoc />
     protected override void OnSnapshot(EngineSnapshot snapshot)
     {
-        SensorPicker.Load(snapshot.Sensors);
-
-        var previous = Selected?.Id;
-
         var users = snapshot.Configuration.Controls
             .GroupBy(binding => binding.CurveId)
             .ToDictionary(group => group.Key, group => group.Count());
+
+        var sensors = snapshot.Sensors.ToDictionary(sensor => sensor.Id);
 
         Curves.Clear();
 
@@ -169,39 +202,46 @@ public sealed partial class CurvesViewModel(EngineConnection connection, Notific
             Curves.Add(new CurveListItemViewModel(definition)
             {
                 Users = users.GetValueOrDefault(definition.Id),
+                ReadsText = Describe(definition, sensors, snapshot.Configuration),
             });
         }
 
-        // An unsaved edit survives a snapshot arriving. One turns up whenever anything else changes
-        // the configuration, and losing a half-drawn curve because a fan was pinned in another
-        // window would be its own kind of bug.
-        if (IsDirty && Editor is not null)
-        {
-            return;
-        }
-
-        Selected = previous is { } id
-            ? Curves.FirstOrDefault(curve => curve.Id == id)
-            : Curves.FirstOrDefault();
+        OnPropertyChanged(nameof(IsEmpty));
     }
 
     /// <inheritdoc />
     /// <remarks>
-    /// The live read-out is the reason this page follows ticks at all now. It turns the editor from
-    /// a form into something you can watch respond, which is the only way to tell a badly shaped
-    /// curve from a well shaped one without waiting for the machine to get hot.
+    /// The live read-out is why this page follows ticks. It turns a curve from a form into
+    /// something you can watch respond, which is the only way to tell a badly shaped curve from a
+    /// well shaped one without waiting for the machine to get hot.
     /// </remarks>
     protected override void OnTick(TickSnapshot tick)
     {
-        SensorPicker.Apply(tick);
+        foreach (var row in Curves)
+        {
+            row.OutputText = "—";
+        }
 
-        // The reading inside it moved even though the selection did not.
-        OnPropertyChanged(nameof(ReadsText));
+        foreach (var reading in tick.Curves)
+        {
+            foreach (var row in Curves)
+            {
+                if (row.Id == reading.Id)
+                {
+                    row.OutputText = reading.Output is { } duty ? $"{duty.Percent:0.#} %" : "—";
+                    break;
+                }
+            }
+        }
 
-        if (Editor is not { } editor)
+        if (_open is not { } editor)
         {
             return;
         }
+
+        // The panel open over the page wants both the readings behind its picker and its own
+        // output.
+        editor.Apply(tick);
 
         foreach (var reading in tick.Curves)
         {
@@ -212,73 +252,121 @@ public sealed partial class CurvesViewModel(EngineConnection connection, Notific
             }
         }
 
-        // Not in the tick at all: an unsaved curve the engine has never seen. Saying "no output" is
-        // honest, and saying nothing would leave the last saved curve's number under a new one.
+        // Not in the tick at all: a curve the engine has never seen. Saying "no output" is honest,
+        // and saying nothing would leave another curve's number under a new one.
         editor.LiveOutput = null;
     }
 
     /// <summary>
-    /// Records which sensor the open curve should read.
+    /// What deleting this curve costs, in the terms the user cares about.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// Here rather than on the tree, because choosing one is an edit: it has to mark the curve
-    /// unsaved and refresh the line the picker is folded behind.
-    /// </para>
-    /// <para>
-    /// An echo is not an edit. The radio buttons raise <c>Checked</c> when they are realised, not
-    /// only when they are clicked, so opening the group that holds the current sensor - which is
-    /// now what happens every time a curve is opened - announced a choice nobody made and marked
-    /// every curve unsaved on sight. Comparing against what the editor already reads is what tells
-    /// the two apart, and it needs no suppression flag to do it.
-    /// </para>
+    /// The fans are the point. Deleting a curve switches off everything it was driving, and a
+    /// confirmation that did not say so would be a speed bump rather than a warning.
     /// </remarks>
-    public void ChooseSensor(SensorItemViewModel sensor)
+    internal static string DeletionCost(CurveListItemViewModel item)
     {
-        ArgumentNullException.ThrowIfNull(sensor);
+        ArgumentNullException.ThrowIfNull(item);
 
-        if (Editor is { } current && current.Source == sensor.Id)
+        return item.Users switch
         {
-            SensorPicker.Selected = sensor;
-            return;
-        }
-
-        SensorPicker.Selected = sensor;
-
-        if (Editor is { } editor)
-        {
-            editor.Source = sensor.Id;
-        }
-
-        OnPropertyChanged(nameof(ReadsText));
-        OnPropertyChanged(nameof(HasSource));
-        IsDirty = true;
+            0 => "Nothing is using it, so nothing else changes.",
+            1 => "The fan it drives will be switched off. This cannot be undone.",
+            var count => $"The {count} fans it drives will be switched off. This cannot be undone.",
+        };
     }
 
-    partial void OnSelectedChanged(CurveListItemViewModel? oldValue, CurveListItemViewModel? newValue)
+    /// <summary>
+    /// What a curve reads, for the line under its name.
+    /// </summary>
+    /// <remarks>
+    /// Named rather than left to the editor, because "which of my curves is watching the GPU" is a
+    /// question this page ought to answer without opening every one of them in turn.
+    /// </remarks>
+    internal static string Describe(
+        CurveDefinition curve,
+        IReadOnlyDictionary<SensorId, SensorDescriptor> sensors,
+        ImpellerConfiguration configuration)
     {
-        // A curve added and never saved is not in the configuration, so leaving its row behind
-        // gives the user something to click that opens a blank panel. Add's own promise is that a
-        // mis-click leaves nothing behind; this is what makes that true.
-        if (oldValue is not null && !IsSaved(oldValue))
+        ArgumentNullException.ThrowIfNull(curve);
+        ArgumentNullException.ThrowIfNull(sensors);
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        return curve switch
         {
-            Curves.Remove(oldValue);
+            FlatCurveDefinition flat => $"Always {flat.Duty.Percent:0.#} %",
+            LinearCurveDefinition linear => Reads(linear.Source, sensors),
+            GraphCurveDefinition graph => Reads(graph.Source, sensors),
+            TriggerCurveDefinition trigger => Reads(trigger.Source, sensors),
+            AutoCurveDefinition auto => Reads(auto.Source, sensors),
+            MixCurveDefinition mix => mix.Sources.Count switch
+            {
+                0 => "No curves chosen yet",
+                1 => "Combines 1 curve",
+                var count => $"Combines {count} curves",
+            },
+            SyncCurveDefinition sync => Follows(sync, configuration),
+            _ => string.Empty,
+        };
+    }
+
+    private static string Reads(SensorId id, IReadOnlyDictionary<SensorId, SensorDescriptor> sensors) =>
+        id.IsNone ? "No sensor chosen yet"
+        : sensors.TryGetValue(id, out var sensor) ? $"Reads {sensor.DisplayName}"
+        : "Reads a sensor that is not here";
+
+    private static string Follows(SyncCurveDefinition sync, ImpellerConfiguration configuration) =>
+        sync.SourceKind switch
+        {
+            SyncSourceKind.Curve =>
+                configuration.Curves.FirstOrDefault(curve => curve.Id == sync.SourceCurve) is { } other
+                    ? $"Follows '{other.Name}'"
+                    : "Follows a curve that is not here",
+            SyncSourceKind.Control => "Follows a fan",
+            _ => "Nothing chosen yet",
+        };
+
+    /// <summary>Puts a curve's panel in front of the user and keeps what they built.</summary>
+    private async Task<bool> OpenAsync(CurveDefinition definition, EngineSnapshot snapshot, bool isNew)
+    {
+        var editor = new CurveEditorViewModel(definition, OptionsFor(definition, snapshot)) { IsNew = isNew };
+
+        // Held only while the panel is up, so ticks reach it. Cleared in the finally, because a
+        // panel that was cancelled must not go on being fed readings.
+        _open = editor;
+
+        try
+        {
+            if (!await Compose!(editor).ConfigureAwait(true))
+            {
+                return false;
+            }
+        }
+        finally
+        {
+            _open = null;
         }
 
-        if (newValue is null
-            || Snapshot is not { } snapshot
-            || snapshot.Configuration.Curves.FirstOrDefault(curve => curve.Id == newValue.Id) is not { } definition)
+        _built = editor.Build();
+        return true;
+    }
+
+    /// <summary>Puts a built curve into the configuration, replacing it or adding it.</summary>
+    private async Task SaveAsync(EngineSnapshot snapshot, CurveDefinition definition, string success)
+    {
+        var curves = snapshot.Configuration.Curves.ToArray();
+        var index = Array.FindIndex(curves, curve => curve.Id == definition.Id);
+
+        if (index < 0)
         {
-            Editor = null;
-            return;
+            curves = [.. curves, definition];
+        }
+        else
+        {
+            curves[index] = definition;
         }
 
-        Editor = new CurveEditorViewModel(definition, OptionsFor(definition));
-        SensorPicker.Select(Editor.Source);
-        IsDirty = false;
-
-        OnPropertyChanged(nameof(ReadsText));
-        OnPropertyChanged(nameof(HasSource));
+        await ApplyAsync(snapshot.Configuration with { Curves = [.. curves] }, success).ConfigureAwait(true);
     }
 
     /// <summary>
@@ -288,13 +376,8 @@ public sealed partial class CurvesViewModel(EngineConnection connection, Notific
     /// Built fresh for each editor rather than kept and handed round: a mix ticks the boxes on
     /// these, so a shared set would carry one curve's choices into the next one opened.
     /// </remarks>
-    private CurveEditorOptions OptionsFor(CurveDefinition definition)
+    private static CurveEditorOptions OptionsFor(CurveDefinition definition, EngineSnapshot snapshot)
     {
-        if (Snapshot is not { } snapshot)
-        {
-            return CurveEditorOptions.Empty;
-        }
-
         var curves = snapshot.Configuration.Curves
             .Where(curve => curve.Id != definition.Id)
             .Select(curve => new CurveChoiceViewModel(curve.Id, curve.Name))
@@ -304,23 +387,15 @@ public sealed partial class CurvesViewModel(EngineConnection connection, Notific
             .Select(control => new ControlChoice(control.Id, control.DisplayName))
             .ToArray();
 
-        return new CurveEditorOptions(curves, controls);
+        return new CurveEditorOptions(curves, controls) { Sensors = [.. snapshot.Sensors] };
     }
 
-    /// <summary>
-    /// Adds a curve of one kind and opens it.
-    /// </summary>
-    /// <remarks>
-    /// Created here and not saved until the user says so, so a mis-click leaves nothing behind and
-    /// nothing reaches a fan.
-    /// </remarks>
-    [RelayCommand]
-    private void Add(CurveEditorKind kind)
+    /// <summary>A curve of the chosen kind, opened with values rather than an empty form.</summary>
+    private static CurveDefinition Blank(CurveEditorKind kind, string name)
     {
         var id = CurveId.New();
-        var name = UnusedName(kind.ToString());
 
-        CurveDefinition definition = kind switch
+        return kind switch
         {
             CurveEditorKind.Linear => new LinearCurveDefinition
             {
@@ -358,149 +433,23 @@ public sealed partial class CurvesViewModel(EngineConnection connection, Notific
             CurveEditorKind.Auto => new AutoCurveDefinition { Id = id, Name = name },
             _ => new FlatCurveDefinition { Id = id, Name = name, Duty = new Duty(50f) },
         };
-
-        var item = new CurveListItemViewModel(definition);
-        Curves.Add(item);
-
-        Selected = item;
-        Editor = new CurveEditorViewModel(definition, OptionsFor(definition));
-        IsDirty = true;
-
-        // Cleared rather than left. Setting Selected above cannot open the editor - the curve is
-        // not in the configuration yet - so the picker still holds the last curve's sensor, and a
-        // brand new curve would show a Reads line naming a sensor it does not actually read.
-        SensorPicker.Select(Editor.Source);
-
-        OnPropertyChanged(nameof(ReadsText));
-        OnPropertyChanged(nameof(HasSource));
     }
 
-    /// <summary>Saves the open curve into the configuration and applies it.</summary>
-    [RelayCommand]
-    private async Task SaveAsync()
-    {
-        if (Editor is not { } editor || Snapshot is not { } snapshot)
-        {
-            return;
-        }
-
-        var definition = editor.Build();
-        var curves = snapshot.Configuration.Curves.ToArray();
-        var index = Array.FindIndex(curves, curve => curve.Id == definition.Id);
-
-        if (index < 0)
-        {
-            curves = [.. curves, definition];
-        }
-        else
-        {
-            curves[index] = definition;
-        }
-
-        if (await ApplyAsync(snapshot.Configuration with { Curves = [.. curves] }).ConfigureAwait(true))
-        {
-            IsDirty = false;
-        }
-    }
-
-    /// <summary>
-    /// Deletes the open curve, and unbinds anything that was using it.
-    /// </summary>
-    /// <remarks>
-    /// The unbinding is the point. A control left pointing at a curve that no longer exists makes
-    /// the whole configuration fail validation, so deleting one curve would otherwise refuse to
-    /// save until the user had found every control that referenced it.
-    /// </remarks>
-    [RelayCommand]
-    private async Task DeleteAsync()
-    {
-        if (Selected is not { } selected || Snapshot is not { } snapshot)
-        {
-            return;
-        }
-
-        // A curve that was never saved has nothing to lose, so asking about it would be a dialog
-        // for a keystroke. Everything else is asked about: Delete sits next to Save and Revert, one
-        // click from each, and the curves it removes are the only thing on this page that cannot be
-        // got back.
-        if (IsSaved(selected)
-            && Confirm is { } confirm
-            && !await confirm($"Delete '{selected.Name}'?", DeletionCost(selected)).ConfigureAwait(true))
-        {
-            return;
-        }
-
-        var curves = snapshot.Configuration.Curves
-            .Where(curve => curve.Id != selected.Id)
-            .ToArray();
-
-        var controls = snapshot.Configuration.Controls
-            .Select(binding => binding.CurveId == selected.Id
-                ? binding with { CurveId = CurveId.None, Enabled = false }
-                : binding)
-            .ToArray();
-
-        IsDirty = false;
-
-        await ApplyAsync(snapshot.Configuration with
-        {
-            Curves = [.. curves],
-            Controls = [.. controls],
-        }).ConfigureAwait(true);
-    }
-
-    /// <summary>
-    /// Throws away the open curve's unsaved changes.
-    /// </summary>
-    /// <remarks>
-    /// For a curve that was never saved this discards the curve itself, which is the only thing
-    /// reverting it could mean.
-    /// </remarks>
-    [RelayCommand]
-    private void Revert()
-    {
-        IsDirty = false;
-
-        var selected = Selected;
-        Selected = null;
-
-        // Null unless it survived being deselected, which a never-saved curve does not.
-        Selected = selected is not null && Curves.Contains(selected) ? selected : null;
-    }
-
-    /// <summary>Whether the engine has this curve, as opposed to it only existing on this page.</summary>
-    private bool IsSaved(CurveListItemViewModel item) =>
-        Snapshot is { } snapshot && snapshot.Configuration.Curves.Any(curve => curve.Id == item.Id);
-
-    /// <summary>
-    /// What deleting this curve costs, in the terms the user cares about.
-    /// </summary>
-    /// <remarks>
-    /// The fans are the point. Deleting a curve switches off everything it was driving, and a
-    /// confirmation that did not say so would be a speed bump rather than a warning.
-    /// </remarks>
-    private static string DeletionCost(CurveListItemViewModel item) => item.Users switch
-    {
-        0 => "Nothing is using it, so nothing else changes.",
-        1 => "The fan it drives will be switched off. This cannot be undone.",
-        var count => $"The {count} fans it drives will be switched off. This cannot be undone.",
-    };
-
-    private async Task<bool> ApplyAsync(ImpellerConfiguration configuration)
+    private async Task ApplyAsync(ImpellerConfiguration configuration, string success)
     {
         if (Connection.Engine is not { } engine)
         {
             Notify.Error("Not connected to the engine.", "Nothing was saved.");
-            return false;
+            return;
         }
 
         try
         {
             var result = await engine.ApplyConfigurationAsync(configuration).ConfigureAwait(true);
 
-            // Warnings are said as well as errors. A curve reading hardware that is not here
-            // right now applies perfectly well and is still worth mentioning before the user
-            // walks away - so the severity follows whether it applied, not whether it was quiet.
+            // Warnings are said as well as errors. A curve reading hardware that is not here right
+            // now applies perfectly well and is still worth mentioning before the user walks away,
+            // so the severity follows whether it applied rather than whether it was quiet.
             if (result.Validation.Issues.Count > 0)
             {
                 var detail = string.Join(" ", result.Validation.Issues.Select(issue => issue.Message));
@@ -513,18 +462,22 @@ public sealed partial class CurvesViewModel(EngineConnection connection, Notific
                 {
                     Notify.Error("The curve was refused.", detail);
                 }
-            }
-            else if (result.Applied)
-            {
-                Notify.Success("Curves saved.");
+
+                return;
             }
 
-            return result.Applied;
+            if (result.Applied)
+            {
+                Notify.Success(success);
+            }
+            else
+            {
+                Notify.Error("The change was refused.", "Nothing was saved.");
+            }
         }
         catch (Exception ex)
         {
             Notify.Error("The curve could not be saved.", ex);
-            return false;
         }
     }
 

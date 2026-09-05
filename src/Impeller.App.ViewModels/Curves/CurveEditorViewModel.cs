@@ -1,7 +1,9 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using Impeller.App.ViewModels.Sensors;
 using Impeller.Core.Abstractions;
 using Impeller.Core.Abstractions.Configuration;
+using Impeller.Ipc.Contracts;
 
 namespace Impeller.App.ViewModels.Curves;
 
@@ -85,6 +87,15 @@ public sealed record CurveEditorOptions(
     IReadOnlyList<CurveChoiceViewModel> Curves,
     IReadOnlyList<ControlChoice> Controls)
 {
+    /// <summary>
+    /// The machine's sensors, for the picker that chooses what the curve reads.
+    /// </summary>
+    /// <remarks>
+    /// An init-only property rather than a third positional parameter, so the many places that
+    /// build options from curves and controls alone keep working unchanged.
+    /// </remarks>
+    public IReadOnlyList<SensorDescriptor> Sensors { get; init; } = [];
+
     /// <summary>Nothing to point at, for a curve opened without a configuration behind it.</summary>
     public static CurveEditorOptions Empty { get; } = new([], []);
 }
@@ -235,10 +246,16 @@ public sealed partial class CurveEditorViewModel : ObservableObject
         {
             choice.PropertyChanged += (_, _) => OnPropertyChanged(nameof(CurveChoices));
         }
+
+        SensorPicker.Load(options.Sensors);
+        SensorPicker.Select(Source);
     }
 
     /// <summary>Which curve this is. Unchanged by editing — a curve keeps its identity through a rename.</summary>
     public CurveId Id { get; }
+
+    /// <summary>Whether this curve is being made rather than changed. Only the wording depends on it.</summary>
+    public bool IsNew { get; init; }
 
     /// <summary>Which editor the view should show.</summary>
     public CurveEditorKind Kind { get; }
@@ -250,6 +267,74 @@ public sealed partial class CurveEditorViewModel : ObservableObject
     /// <summary>The sensor driving it, for the kinds that read one.</summary>
     [ObservableProperty]
     public partial SensorId Source { get; set; } = SensorId.None;
+
+    /// <summary>
+    /// The temperatures this curve could read, grouped and searchable.
+    /// </summary>
+    /// <remarks>
+    /// Built by the initialiser rather than in the constructor body, because assigning
+    /// <see cref="Source"/> from the definition raises a change that comes straight back here - so
+    /// a picker made later than that is a picker that does not exist when it is first asked for.
+    /// Temperatures only, because offering the machine's 194 sensors is offering a great many wrong
+    /// answers beside the right one.
+    /// </remarks>
+    public SensorTreeViewModel SensorPicker { get; } = new()
+    {
+        OnlyKind = SensorKind.Temperature,
+        IncludeControls = false,
+    };
+
+    /// <summary>
+    /// The sensor it reads and what that sensor says right now.
+    /// </summary>
+    /// <remarks>
+    /// The line the picker folds behind. An editor that showed a hundred and ninety-three radio
+    /// buttons and never said which one was chosen made the most important fact on the panel the
+    /// hardest one to find.
+    /// </remarks>
+    public string ReadsText => SensorPicker.Selected is { } sensor
+        ? $"{sensor.Name} — {sensor.ValueText}"
+        : "No sensor chosen yet";
+
+    /// <summary>Whether a sensor has been chosen at all.</summary>
+    public bool HasSource => SensorPicker.Selected is not null;
+
+    /// <summary>
+    /// Records which sensor this curve should read.
+    /// </summary>
+    /// <remarks>
+    /// An echo is not a choice. The radio buttons raise <c>Checked</c> when they are realised, not
+    /// only when they are clicked, and the group holding the current sensor opens itself every time
+    /// the editor is opened - so without this guard every curve announced a choice nobody made.
+    /// </remarks>
+    public void ChooseSensor(SensorItemViewModel sensor)
+    {
+        ArgumentNullException.ThrowIfNull(sensor);
+
+        SensorPicker.Selected = sensor;
+
+        if (Source != sensor.Id)
+        {
+            Source = sensor.Id;
+        }
+    }
+
+    /// <summary>Keeps the line above the picker agreeing with the picker.</summary>
+    partial void OnSourceChanged(SensorId value)
+    {
+        SensorPicker.Select(value);
+        OnPropertyChanged(nameof(ReadsText));
+        OnPropertyChanged(nameof(HasSource));
+    }
+
+    /// <summary>Takes one tick's readings, so the line above the picker moves while it is open.</summary>
+    public void Apply(TickSnapshot tick)
+    {
+        ArgumentNullException.ThrowIfNull(tick);
+
+        SensorPicker.Apply(tick);
+        OnPropertyChanged(nameof(ReadsText));
+    }
 
     /// <summary>The vertices of a graph curve, always in ascending input order.</summary>
     public ObservableCollection<CurvePointViewModel> Points { get; } = [];
