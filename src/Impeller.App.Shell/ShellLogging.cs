@@ -23,10 +23,7 @@ namespace Impeller.App.Shell;
 public static class ShellLogging
 {
     /// <summary>The folder shell logs are written to.</summary>
-    public static string LogRoot { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "Impeller",
-        "Logs");
+    public static string LogRoot { get; } = Path.Combine(ShellState.Root, "Logs");
 
     /// <summary>Adds logging to the shell's container.</summary>
     /// <remarks>

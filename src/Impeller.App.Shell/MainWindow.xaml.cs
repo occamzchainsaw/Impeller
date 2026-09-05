@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using Impeller.App.Shell.Pages;
 using Impeller.App.ViewModels;
 using Impeller.App.ViewModels.Notifications;
+using Impeller.App.ViewModels.Shell;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -57,6 +58,12 @@ public sealed partial class MainWindow : Window
         SetTitleBar(AppTitleBar);
         AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
         AppWindow.SetIcon("Assets/AppIcon.ico");
+
+        // Before the window is activated, so it opens where it belongs instead of appearing at
+        // whatever size Windows picked and then jumping.
+        // Not held: it follows the window through its own events, and outliving this constructor is
+        // the whole job. Closing the window hides it to the tray, so there is nothing to let go of.
+        new WindowPlacementMemory(this, new WindowPlacementStore(ShellState.WindowFile)).Restore();
 
         Notifications.Posted += OnPosted;
         Closed += (_, _) => Notifications.Posted -= OnPosted;
