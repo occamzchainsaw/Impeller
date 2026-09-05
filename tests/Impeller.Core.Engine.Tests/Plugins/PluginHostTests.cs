@@ -201,6 +201,42 @@ public sealed class PluginHostTests
         Assert.Equal(PluginAcquireFailure.AlreadyOwned, outcome.Failure);
         Assert.Equal(ControlHolder.User, outcome.Holder);
         Assert.Equal(ControlOwnershipRegistry.ManualClaimant, outcome.HolderId);
+
+        // The id is for the caller; the message is for the person. A manual claim is recorded
+        // under the claimant "shell", and the message a user sees must not be built out of it.
+        Assert.DoesNotContain(ControlOwnershipRegistry.ManualClaimant, outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("by hand", outcome.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_fan_another_plugin_is_holding_is_refused_and_that_plugin_is_named()
+    {
+        // By the name the user approved, not the reverse-DNS id they have never seen. The id still
+        // travels on HolderId, where a program rather than a person is reading it.
+        await using var rig = new Rig();
+        await using var plug = rig.Connect();
+        await rig.AdmitAndGrantAsync(plug);
+
+        const string Other = "com.example.other";
+
+        rig.Plugins.Admit(
+            new PluginManifest(
+                Other,
+                "Some Other App",
+                "1.0.0",
+                PluginProtocol.CurrentVersion,
+                [PluginCapability.ControlFans]),
+            Identity,
+            "1.0.0-test");
+
+        rig.Loop.TryAcquire(rig.Fan.Id, ControlOwnerKind.Plugin, Other);
+
+        var outcome = await plug.Engine.AcquireAsync(rig.FanRef);
+
+        Assert.Equal(PluginAcquireFailure.AlreadyOwned, outcome.Failure);
+        Assert.Equal(Other, outcome.HolderId);
+        Assert.Contains("Some Other App", outcome.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(Other, outcome.Message, StringComparison.Ordinal);
     }
 
     // ---- driving a fan ---------------------------------------------------------------------

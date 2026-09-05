@@ -564,7 +564,7 @@ public sealed class PluginSession : IPluginHost, IAsyncDisposable
         }
     }
 
-    private static AcquireOutcome Refusal(ControlAcquireResult result)
+    private AcquireOutcome Refusal(ControlAcquireResult result)
     {
         var failure = PluginTranslation.ToFailure(result.Failure);
         var holder = result.CurrentOwner is { } owner
@@ -578,12 +578,22 @@ public sealed class PluginSession : IPluginHost, IAsyncDisposable
                 PluginAcquireFailure.UnknownControl =>
                     "Impeller does not see a control with that reference.",
 
-                // Names the holder rather than saying "something else". A user told that iracing
-                // has their fan knows what to close; one told that something does, does not.
-                PluginAcquireFailure.AlreadyOwned when result.CurrentOwner?.ClaimantId is { } who =>
-                    $"'{who}' is holding this fan.",
+                // The user's own hold is tested first, and that order is the whole of it. A
+                // manual claim carries a claimant id like any other - the literal string "shell" -
+                // so an arm that only asks whether there is an id answers every manual hold with
+                // "'shell' is holding this fan", which names an implementation detail at the one
+                // moment the user needs to recognise themselves. It also says what to do, because
+                // this is the one refusal the person reading it can lift.
                 PluginAcquireFailure.AlreadyOwned when holder == ControlHolder.User =>
-                    "The user is holding this fan by hand in Impeller.",
+                    "You are driving this fan by hand in Impeller. Hand it back to its curve there "
+                        + "to let this app take it.",
+
+                // Names the holder rather than saying "something else". A user told that iracing
+                // has their fan knows what to close; one told that something does, does not. The
+                // display name, not the id: nobody chose to read reverse-DNS.
+                PluginAcquireFailure.AlreadyOwned when result.CurrentOwner?.ClaimantId is { } who =>
+                    $"'{_host.NameOf(who)}' is holding this fan.",
+
                 PluginAcquireFailure.AlreadyOwned => "Something else is holding this fan.",
 
                 PluginAcquireFailure.NotDriven =>

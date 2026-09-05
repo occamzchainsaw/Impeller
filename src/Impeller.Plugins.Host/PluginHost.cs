@@ -139,6 +139,23 @@ public sealed partial class PluginHost : IAsyncDisposable
     }
 
     /// <summary>
+    /// What to call a claimant in a sentence someone is going to read.
+    /// </summary>
+    /// <remarks>
+    /// A plugin id is reverse-DNS and deliberately never changes, which makes it the right key and
+    /// the wrong label. "com.occamzchainsaw.rigfan is holding this fan" names something the user
+    /// has never seen; the display name is what they were shown when they approved it. The live
+    /// session is asked first because that manifest is the current one, the stored record second
+    /// because a plugin can hold nothing while disconnected but can still be worth naming, and the
+    /// id last because a name is better than nothing and nothing is worse than a wrong name.
+    /// </remarks>
+    /// <param name="claimantId">The claimant, as the ownership registry records it.</param>
+    public string NameOf(string claimantId) =>
+        Find(claimantId)?.Manifest?.DisplayName
+            ?? _plugins.Find(claimantId)?.DisplayName
+            ?? claimantId;
+
+    /// <summary>
     /// Takes on a new connection. It has <see cref="PluginHostOptions.HandshakeDeadline"/> to say
     /// hello.
     /// </summary>
