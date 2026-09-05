@@ -202,7 +202,16 @@ public sealed partial class CurveEditorViewModel : ObservableObject
 
             case SyncCurveDefinition sync:
                 Kind = CurveEditorKind.Sync;
-                SyncSourceKind = sync.SourceKind;
+
+                // None becomes Curve on the way in, because None is not a thing the panel can
+                // show. SyncSourceIndex renders it as "Another curve" - the commoner of the two,
+                // and an unselected pair of radio buttons looks broken - and a two-way binding
+                // never pushes back a value the control is already displaying. So a sync curve
+                // made in the editor, saved without touching the radio, came out following
+                // nothing while the panel said it followed a curve.
+                SyncSourceKind = sync.SourceKind == SyncSourceKind.None
+                    ? SyncSourceKind.Curve
+                    : sync.SourceKind;
                 SourceCurve = sync.SourceCurve;
                 SourceControl = sync.SourceControl;
                 Offset = sync.Offset;

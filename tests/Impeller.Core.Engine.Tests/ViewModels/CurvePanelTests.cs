@@ -274,15 +274,37 @@ public class CurvePanelTests
     }
 
     [Fact]
-    public void A_sync_that_has_chosen_neither_shows_the_curve_picker()
+    public void A_sync_that_has_chosen_neither_shows_the_curve_picker_and_saves_that_choice()
     {
         // None is a state, not a choice. A brand new sync curve with no picker at all looks broken,
-        // and following another curve is much the commoner of the two.
+        // and following another curve is much the commoner of the two - so the panel shows the
+        // curve picker, and this used to assert that the editor went on holding None while it did.
+        //
+        // That is the bug rather than the behaviour. RadioButtons.SelectedIndex is bound two way,
+        // and a two-way binding never pushes back a value the control is already displaying: the
+        // panel said "Another curve" from the moment it opened, the user picked a curve, pressed
+        // Save, and got SourceKind.None - a sync curve that follows nothing while every part of
+        // the screen said otherwise. What is shown has to be what is stored.
         var editor = new CurveEditorViewModel(new SyncCurveDefinition { Id = CurveId.New(), Name = "Rear" });
 
-        Assert.Equal(SyncSourceKind.None, editor.SyncSourceKind);
+        Assert.Equal(SyncSourceKind.Curve, editor.SyncSourceKind);
         Assert.True(editor.FollowsCurve);
         Assert.Equal(0, editor.SyncSourceIndex);
+
+        Assert.Equal(SyncSourceKind.Curve, Assert.IsType<SyncCurveDefinition>(editor.Build()).SourceKind);
+    }
+
+    [Fact]
+    public void A_sync_that_follows_a_fan_keeps_following_a_fan()
+    {
+        // The coercion above is for None alone. Reading back a choice the user did make and quietly
+        // changing it would be a worse bug than the one it fixes.
+        var editor = new CurveEditorViewModel(
+            new SyncCurveDefinition { Id = CurveId.New(), Name = "Rear", SourceKind = SyncSourceKind.Control });
+
+        Assert.Equal(SyncSourceKind.Control, editor.SyncSourceKind);
+        Assert.True(editor.FollowsControl);
+        Assert.Equal(1, editor.SyncSourceIndex);
     }
 
     // ---- the live read-out ----------------------------------------------------------------------
