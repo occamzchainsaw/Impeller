@@ -552,6 +552,7 @@ public sealed class EngineRpcService(
             control.Fingerprint.ProviderId,
             control.Fingerprint.ToString(),
             loop.GetCommandedDuty(control.Id) ?? control.CommandedDuty,
+            loop.GetTargetDuty(control.Id),
             control.SupportsAutomaticMode,
             owner.Kind,
             owner.ClaimantId,

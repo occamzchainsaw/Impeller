@@ -144,7 +144,16 @@
                                             ToolTipService.ToolTip="This fan is in the configuration but the engine cannot see it. Its settings are kept."
                                             Visibility="{x:Bind local:DashboardPage.WhenNot(IsPresent)}" />
 
+                                        <!--
+                                            Both stretch, so the shorter one grows to the taller.
+                                            A glyph and a word do not measure the same height, and
+                                            in a horizontal StackPanel each child otherwise keeps
+                                            its own - which left the bin button visibly squat
+                                            beside Identify. Stretch rather than a fixed height, so
+                                            it still holds at other text sizes and scalings.
+                                        -->
                                         <Button
+                                            VerticalAlignment="Stretch"
                                             Command="{x:Bind IdentifyCommand}"
                                             Content="Identify"
                                             IsEnabled="{x:Bind IsPresent}"
@@ -152,7 +161,8 @@
 
                                         <!--  Named, because a button whose only content is a glyph announces nothing.  -->
                                         <Button
-                                            Padding="8,5,8,5"
+                                            Padding="10,0,10,0"
+                                            VerticalAlignment="Stretch"
                                             AutomationProperties.Name="Remove this fan"
                                             Click="OnRemoveFan"
                                             Tag="{x:Bind}"
@@ -165,6 +175,7 @@
                                 <!--  The two numbers, and who is deciding them.  -->
                                 <Grid ColumnSpacing="10">
                                     <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
@@ -182,8 +193,23 @@
                                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                         Text="{x:Bind SpeedText, Mode=OneWay}" />
 
+                                    <!--
+                                        On the same row rather than a line of its own: UniformGridLayout
+                                        gives every card the height of the first it measures, so a row
+                                        that appears on one card and not another is cut off on all of
+                                        them. Empty when the fan got what was asked for, which is an
+                                        Auto column occupying nothing.
+                                    -->
                                     <TextBlock
                                         Grid.Column="2"
+                                        Margin="0,0,0,4"
+                                        VerticalAlignment="Bottom"
+                                        Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                        Text="{x:Bind RequestedText, Mode=OneWay}"
+                                        ToolTipService.ToolTip="{x:Bind RequestedDetail, Mode=OneWay}" />
+
+                                    <TextBlock
+                                        Grid.Column="3"
                                         Margin="0,0,0,4"
                                         VerticalAlignment="Bottom"
                                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"

@@ -41,6 +41,17 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
     /// <summary>What an identify run spins it up to.</summary>
     private static readonly Duty IdentifyDuty = new(100f);
 
+    /// <summary>
+    /// How far a command may sit from its request before the card says so, in percentage points.
+    /// </summary>
+    /// <remarks>
+    /// One point, which is below what any fan resolves anyway. The point of a tolerance at all is
+    /// the slew limiter: it walks a duty toward its target across several ticks, and without this
+    /// every ordinary ramp would flash an explanation for a disagreement that resolves itself in a
+    /// second.
+    /// </remarks>
+    private const float RequestTolerance = 1f;
+
     private readonly EngineConnection _connection;
     private readonly NotificationCenter _notify;
     private readonly Func<ControlBindingDefinition, Task> _save;
@@ -90,7 +101,12 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
         if (descriptor is not null)
         {
             Apply(
-                new ControlReading(Id, descriptor.CommandedDuty, descriptor.Owner, descriptor.ClaimantId),
+                new ControlReading(
+                    Id,
+                    descriptor.CommandedDuty,
+                    descriptor.RequestedDuty,
+                    descriptor.Owner,
+                    descriptor.ClaimantId),
                 null);
         }
     }
@@ -176,6 +192,22 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
     /// <summary>What its paired tacho reads, or a dash when there is none.</summary>
     [ObservableProperty]
     public partial string SpeedText { get; private set; } = "—";
+
+    /// <summary>
+    /// What the curve or claimant asked for, shown only when it is not what the fan got.
+    /// </summary>
+    /// <remarks>
+    /// Empty in the ordinary case, where the request and the command are the same number and
+    /// printing it twice would be noise. It earns its place in the case that reads as a fault: a
+    /// fan sitting at 0% because its curve asked for less than the fan can physically sustain looks
+    /// exactly like a broken curve, and the engine is the only thing that knows it is not.
+    /// </remarks>
+    [ObservableProperty]
+    public partial string RequestedText { get; private set; } = string.Empty;
+
+    /// <summary>The whole sentence, for hovering over <see cref="RequestedText"/>.</summary>
+    [ObservableProperty]
+    public partial string RequestedDetail { get; private set; } = string.Empty;
 
     /// <summary>What is deciding this fan's speed, named for a person.</summary>
     [ObservableProperty]
@@ -311,6 +343,8 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
         DutyText = reading.CommandedDuty?.ToString() ?? "—";
         SpeedText = rpm is { } speed ? $"{speed:0} RPM" : "—";
 
+        DescribeRequest(reading);
+
         IsPinned = reading.Owner == ControlOwnerKind.ManualOverride;
         IsHeldElsewhere = reading.Owner is ControlOwnerKind.Plugin or ControlOwnerKind.Failsafe;
 
@@ -348,6 +382,65 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
             PinDuty = commanded.Percent;
             _suppressWrite = false;
         }
+    }
+
+    /// <summary>
+    /// Works out whether the request and the command disagree, and says why if they do.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Three things sit between what an owner asks for and what the fan gets: the binding's minimum
+    /// and maximum, its slew limiter, and the start/stop gate. Only the last of them can turn a
+    /// positive request into nothing at all, and that is the one people report as a bug — so it is
+    /// named explicitly rather than left to a generic "adjusted".
+    /// </para>
+    /// <para>
+    /// A tolerance rather than an equality test, because the slew limiter walks the duty toward the
+    /// target over several ticks and a card that announced a disagreement during every ramp would
+    /// be announcing normal operation.
+    /// </para>
+    /// </remarks>
+    private void DescribeRequest(ControlReading reading)
+    {
+        if (reading.RequestedDuty is not { } requested)
+        {
+            RequestedText = string.Empty;
+            RequestedDetail = string.Empty;
+            return;
+        }
+
+        var commanded = reading.CommandedDuty;
+
+        if (commanded is { } actual && Duty.Distance(actual, requested) < RequestTolerance)
+        {
+            RequestedText = string.Empty;
+            RequestedDetail = string.Empty;
+            return;
+        }
+
+        RequestedText = $"asks {requested}";
+
+        var asker = reading.Owner switch
+        {
+            ControlOwnerKind.ManualOverride => "You are asking for",
+            ControlOwnerKind.Plugin => $"{_nameClaimant(reading.ClaimantId) ?? "A plugin"} is asking for",
+            ControlOwnerKind.Failsafe => "The failsafe is asking for",
+            _ => "This fan's curve is asking for",
+        };
+
+        // The stall floor is the case worth explaining in full: it is the only one where a fan can
+        // read 0% while something is actively asking it to run, and it is not a fault.
+        var stalls = !_binding.StopDuty.IsOff
+            && requested.Percent <= _binding.StopDuty.Percent
+            && commanded is { IsOff: true };
+
+        RequestedDetail = stalls
+            ? $"{asker} {requested}, but this fan stalls below {_binding.StopDuty} — measured during "
+                + "calibration. Impeller holds it off rather than command a speed that would leave "
+                + "it drawing current, reporting no RPM and moving no air. Raise the curve's "
+                + "minimum duty above that to keep it turning."
+            : $"{asker} {requested}. The fan is at {commanded?.ToString() ?? "nothing"}, held there "
+                + "by this fan's own limits or its ramp rate.";
     }
 
     /// <summary>Whether the user currently has the name field open.</summary>

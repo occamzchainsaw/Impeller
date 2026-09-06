@@ -5,11 +5,17 @@ namespace Impeller.Core.Engine;
 /// <summary>What one tick did, for diagnostics and for the UI's live view.</summary>
 /// <param name="CurveOutputs">Each curve's output this tick. A null value means the curve could not produce one.</param>
 /// <param name="CommandedDuties">The duty now standing at each control the engine drives.</param>
+/// <param name="TargetDuties">
+/// What each control's owner asked for this tick, before the binding's limits and the start/stop
+/// gate. Carried because the difference between this and <paramref name="CommandedDuties"/> is
+/// invisible from the outside and is the answer to "why is my fan off".
+/// </param>
 /// <param name="ControlsWritten">How many controls actually received a hardware write.</param>
 /// <param name="Faults">Controls whose write threw, paired with the exception.</param>
 public readonly record struct TickResult(
     IReadOnlyDictionary<CurveId, Duty?> CurveOutputs,
     IReadOnlyDictionary<SensorId, Duty> CommandedDuties,
+    IReadOnlyDictionary<SensorId, Duty> TargetDuties,
     int ControlsWritten,
     IReadOnlyDictionary<SensorId, Exception> Faults);
 
@@ -69,6 +75,18 @@ public sealed class ControlLoop
     /// </remarks>
     private readonly HashSet<SensorId> _resting = [];
     private readonly Dictionary<SensorId, Duty> _commandedDuties = [];
+
+    /// <summary>
+    /// What each control's owner asked for on the last tick, whoever the owner was.
+    /// </summary>
+    /// <remarks>
+    /// Not the same as <see cref="_requestedDuties"/>, which only holds what a claimant asked for
+    /// and is empty for the ordinary case of a fan on a curve. This is the output of
+    /// <see cref="ResolveTarget"/> — the number the binding's limits and the start/stop gate are
+    /// then applied to — and it exists so the difference between "the curve wants nothing" and
+    /// "the curve wants 30% and this fan stalls below 40%" can be shown rather than inferred.
+    /// </remarks>
+    private readonly Dictionary<SensorId, Duty> _targetDuties = [];
 
     private IReadOnlyList<IFanCurve> _orderedCurves = [];
     private IReadOnlyDictionary<SensorId, ControlBinding> _bindings =
@@ -412,6 +430,19 @@ public sealed class ControlLoop
         _commandedDuties.TryGetValue(controlId, out var duty) ? duty : null;
 
     /// <summary>
+    /// What the control's owner asked for on the last tick, whoever the owner is.
+    /// </summary>
+    /// <remarks>
+    /// The curve's output for a curve-driven fan, the claimant's request for a held one. Sits one
+    /// step before <see cref="GetCommandedDuty"/>: the binding's minimum and maximum, its avoided
+    /// bands, the slew limiter and the start/stop gate all come after it. Published so a fan
+    /// commanded 0% can say the curve asked for 30% and this fan stalls below 40%, rather than
+    /// leaving somebody to conclude the curve is broken.
+    /// </remarks>
+    public Duty? GetTargetDuty(SensorId controlId) =>
+        _targetDuties.TryGetValue(controlId, out var duty) ? duty : null;
+
+    /// <summary>
     /// The duty the control's current owner last asked for, or null when nobody has asked for one.
     /// </summary>
     /// <remarks>
@@ -485,6 +516,7 @@ public sealed class ControlLoop
         return new TickResult(
             new Dictionary<CurveId, Duty?>(),
             commanded,
+            new Dictionary<SensorId, Duty>(_targetDuties),
             written,
             faults);
     }
@@ -528,6 +560,7 @@ public sealed class ControlLoop
             return new TickResult(
                 new Dictionary<CurveId, Duty?>(),
                 new Dictionary<SensorId, Duty>(_commandedDuties),
+                new Dictionary<SensorId, Duty>(_targetDuties),
                 0,
                 new Dictionary<SensorId, Exception>());
         }
@@ -559,6 +592,10 @@ public sealed class ControlLoop
             // asks - on a first run, once per header on the board.
             if (!binding.Enabled && _ownership.GetOwner(binding.ControlId).IsCurve)
             {
+                // Nobody is asking for anything, so there is no target to report. Left behind, it
+                // would have the card claim a curve wants something for a fan that is switched off.
+                _targetDuties.Remove(binding.ControlId);
+
                 if (_commandedDuties.ContainsKey(binding.ControlId) && Rest(binding, control, faults))
                 {
                     written++;
@@ -585,6 +622,7 @@ public sealed class ControlLoop
             }
 
             _resting.Remove(binding.ControlId);
+            _targetDuties[binding.ControlId] = target;
 
             var current = _commandedDuties.TryGetValue(binding.ControlId, out var last)
                 ? last
@@ -626,6 +664,7 @@ public sealed class ControlLoop
         return new TickResult(
             curveOutputs,
             new Dictionary<SensorId, Duty>(_commandedDuties),
+            new Dictionary<SensorId, Duty>(_targetDuties),
             written,
             faults);
     }
@@ -683,6 +722,11 @@ public sealed class ControlLoop
         {
             return false;
         }
+
+        // Resting is nobody asking for anything. Whatever the last owner wanted is no longer a
+        // live request, and reporting it would explain a fan's duty by something that stopped
+        // applying.
+        _targetDuties.Remove(binding.ControlId);
 
         if (control.SupportsAutomaticMode && control.TryRestoreAutomaticMode())
         {

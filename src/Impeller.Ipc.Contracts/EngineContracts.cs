@@ -230,6 +230,10 @@ public sealed record SensorDescriptor(
 /// <param name="ProviderId">Which backend produced it.</param>
 /// <param name="HardwarePath">Diagnostic rendering of the fingerprint.</param>
 /// <param name="CommandedDuty">The duty last written, or null if the engine has not written it.</param>
+/// <param name="RequestedDuty">
+/// What this control's owner asked for, before the binding's limits and the start/stop gate. Null
+/// when nobody is asking — a switched-off fan, or a curve that could not produce a value.
+/// </param>
 /// <param name="SupportsAutomaticMode">Whether it can be handed back to its own firmware.</param>
 /// <param name="Owner">What sort of claimant is driving it.</param>
 /// <param name="ClaimantId">Which specific claimant, where that means anything.</param>
@@ -251,6 +255,7 @@ public sealed record ControlDescriptor(
     string ProviderId,
     string HardwarePath,
     Duty? CommandedDuty,
+    Duty? RequestedDuty,
     bool SupportsAutomaticMode,
     ControlOwnerKind Owner,
     string? ClaimantId,
@@ -281,6 +286,11 @@ public readonly record struct SensorReading(SensorId Id, float? Value);
 /// <summary>One control's current state.</summary>
 /// <param name="Id">Which control.</param>
 /// <param name="CommandedDuty">The duty standing at it.</param>
+/// <param name="RequestedDuty">
+/// What its owner asked for this tick, before the binding's limits and the start/stop gate. The
+/// difference between the two is invisible from outside the engine, and is the answer to why a fan
+/// whose curve wants 30% is sitting at nothing.
+/// </param>
 /// <param name="Owner">What sort of claimant is driving it.</param>
 /// <param name="ClaimantId">
 /// Which specific claimant, where that means anything - a plugin's manifest id, or the shell's own
@@ -295,6 +305,7 @@ public readonly record struct SensorReading(SensorId Id, float? Value);
 public readonly record struct ControlReading(
     SensorId Id,
     Duty? CommandedDuty,
+    Duty? RequestedDuty,
     ControlOwnerKind Owner,
     string? ClaimantId);
 

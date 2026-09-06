@@ -51,10 +51,21 @@ ArchitecturesAllowed=x64compatible
 Compression=lzma2/max
 SolidCompression=yes
 
-; Restart Manager, so a running window is closed politely instead of locking its own files. No
-; single-instance mutex is declared on purpose: two shells at once is a supported arrangement, and
-; adding a mutex to make this installer's life easier would change how the app behaves.
-CloseApplications=yes
+; Restart Manager, so a running window does not lock its own files during an upgrade.
+;
+; force, not yes, and it is not a shortcut. Impeller cancels its own close and hides to the tray -
+; that is the whole point of having a tray icon - so a polite Restart Manager request is refused
+; exactly as a user's click on the X is refused, and the process stays alive holding its files.
+; The first upgrade to hit this stopped on "Setup was unable to automatically close all
+; applications", after PrepareToInstall had already unregistered the service, which left the fans
+; unmanaged behind a modal dialog. force closes it instead of asking.
+;
+; Safe to terminate: the window holds no unsaved state. Every setting it can change is written
+; through to the engine or the registry as it is made.
+;
+; No single-instance mutex is declared on purpose: two shells at once is a supported arrangement,
+; and adding a mutex to make this installer's life easier would change how the app behaves.
+CloseApplications=force
 RestartApplications=no
 
 [Languages]
@@ -148,12 +159,47 @@ begin
   Sleep(500);
 end;
 
+var
+  ServiceWasRemoved: Boolean;
+  InstallCompleted: Boolean;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   { Before a single file is replaced. A running service holds its own executable open, and on a
     writable install path it also holds the log it is writing. }
   RemoveService;
+  ServiceWasRemoved := True;
   Result := '';
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    InstallCompleted := True;
+end;
+
+{ Puts the service back if setup unregistered it and then did not finish.
+
+  Unregistering has to happen before any file is replaced, which means it happens before setup knows
+  whether it can finish. An upgrade that stops after that point - cancelled, out of disk, a file it
+  could not replace - would otherwise leave the machine with no fan control at all and no message
+  saying so. Best effort: whatever engine binary is at the target path gets re-registered and
+  started, which for an aborted upgrade is either the old one or the new one, and both work. }
+procedure DeinitializeSetup;
+var
+  Code: Integer;
+  Engine: String;
+begin
+  if InstallCompleted or not ServiceWasRemoved then
+    Exit;
+
+  Engine := ExpandConstant('{app}\Engine\Impeller.EngineService.exe');
+
+  if not FileExists(Engine) then
+    Exit;
+
+  Exec(Engine, 'install', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  Exec(Engine, 'start', '', SW_HIDE, ewWaitUntilTerminated, Code);
 end;
 
 { Whether the engine will keep its state beside itself or under ProgramData.

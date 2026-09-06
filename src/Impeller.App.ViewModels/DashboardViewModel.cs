@@ -245,6 +245,7 @@ public sealed partial class DashboardViewModel(EngineConnection connection, Noti
                         new ControlReading(
                             descriptor.Id,
                             descriptor.CommandedDuty,
+                            descriptor.RequestedDuty,
                             descriptor.Owner,
                             descriptor.ClaimantId),
                         null);

@@ -125,6 +125,7 @@ public sealed partial class EngineWorker(
                 return new ControlReading(
                     control.Id,
                     result.CommandedDuties.TryGetValue(control.Id, out var duty) ? duty : control.CommandedDuty,
+                    result.TargetDuties.TryGetValue(control.Id, out var target) ? target : null,
                     owner.Kind,
                     owner.ClaimantId);
             })

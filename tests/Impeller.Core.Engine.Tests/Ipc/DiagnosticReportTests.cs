@@ -52,6 +52,7 @@ public class DiagnosticReportTests
                 "lhm",
                 "/lpc/nct6687d/0/control/0",
                 new Duty(55f),
+                new Duty(55f),
                 SupportsAutomaticMode: true,
                 ControlOwnerKind.ManualOverride,
                 "shell",

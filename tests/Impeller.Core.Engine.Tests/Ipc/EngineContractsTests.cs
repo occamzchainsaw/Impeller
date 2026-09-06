@@ -144,7 +144,14 @@ public sealed class EngineContractsTests : IAsyncDisposable
             42,
             DateTimeOffset.UnixEpoch,
             [new SensorReading(FakeEngine.CpuSensor, 61.5f)],
-            [new ControlReading(FakeEngine.FanControl, new Duty(55f), ControlOwnerKind.Plugin, "com.example.rigfan")],
+            [
+                new ControlReading(
+                    FakeEngine.FanControl,
+                    new Duty(55f),
+                    new Duty(72f),
+                    ControlOwnerKind.Plugin,
+                    "com.example.rigfan"),
+            ],
             [new CurveReading(CurveId.New(), new Duty(72f))]);
 
         await _engine.Events!.OnTickAsync(tick);
@@ -431,7 +438,7 @@ public sealed class EngineContractsTests : IAsyncDisposable
                 new ControlDescriptor(
                     FanControl, "Fan #4", "Seat blower", "Nuvoton NCT6687D", "lhm",
                     "lhm/lpc/nct6687d/0/control/4",
-                    new Duty(55f), false, ControlOwnerKind.Curve, null, Claimable: true),
+                    new Duty(55f), new Duty(60f), false, ControlOwnerKind.Curve, null, Claimable: true),
             ],
             "Default",
             new ImpellerConfiguration
