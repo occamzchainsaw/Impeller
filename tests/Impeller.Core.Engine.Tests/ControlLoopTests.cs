@@ -1,4 +1,4 @@
-using Impeller.Core.Abstractions;
+﻿using Impeller.Core.Abstractions;
 using Impeller.Core.Engine.Curves;
 
 namespace Impeller.Core.Engine.Tests;
@@ -128,25 +128,133 @@ public class ControlLoopTests
     {
         var h = Harness.Build(initialTemperature: 60f);
         h.Loop.Tick(Tick);
-        var beforeCount = h.Fan.Writes.Count;
 
         h.Temperature.Value = null;
         h.Loop.Tick(Tick);
 
-        Assert.Equal(beforeCount, h.Fan.Writes.Count);
         Assert.Equal(50f, h.Fan.CommandedDuty!.Value.Percent, precision: 3);
     }
 
+    /// <summary>
+    /// A held duty is held at the hardware, not merely in the engine's memory.
+    /// </summary>
+    /// <remarks>
+    /// A sensor that goes quiet is the longest a header ever goes without a fresh value, which
+    /// makes it the case most likely to be reclaimed by firmware. Holding has to mean restating.
+    /// </remarks>
     [Fact]
-    public void A_write_that_would_change_nothing_is_skipped()
+    public void A_held_duty_is_restated_while_the_sensor_stays_quiet()
+    {
+        var h = Harness.Build(initialTemperature: 60f);
+        h.Loop.Tick(Tick);
+
+        h.Temperature.Value = null;
+
+        for (var tick = 0; tick < 6; tick++)
+        {
+            h.Loop.Tick(Tick);
+        }
+
+        Assert.True(h.Fan.Writes.Count > 1, "a held duty was written once and then left to lapse");
+        Assert.All(h.Fan.Writes, duty => Assert.Equal(50f, duty.Percent, precision: 3));
+    }
+
+    /// <summary>
+    /// A duty that has not changed is written again anyway, before the interval is out.
+    /// </summary>
+    /// <remarks>
+    /// This asserted the opposite until a machine sitting at a steady temperature went hours
+    /// without Impeller touching a single header. The board firmware took them back and drove them
+    /// from its own curve; the fans pinned at full under load while the shell went on reporting the
+    /// last duty the engine wrote, because that was the last duty the engine knew about. A duty is
+    /// a claim that lapses, not a setting the hardware keeps.
+    /// </remarks>
+    [Fact]
+    public void A_steady_duty_is_written_again_rather_than_left_to_lapse()
     {
         var h = Harness.Build(initialTemperature: 60f);
 
-        h.Loop.Tick(Tick);
-        h.Loop.Tick(Tick);
-        h.Loop.Tick(Tick);
+        for (var tick = 0; tick < 5; tick++)
+        {
+            h.Loop.Tick(Tick);
+        }
 
-        Assert.Single(h.Fan.Writes);
+        Assert.Equal(3, h.Fan.Writes.Count);
+        Assert.All(h.Fan.Writes, duty => Assert.Equal(50f, duty.Percent, precision: 3));
+    }
+
+    /// <summary>
+    /// A manual duty is restated too, so a fan pinned by hand stays pinned.
+    /// </summary>
+    /// <remarks>
+    /// Setting a fan to a fixed percentage and hearing it go on screaming is how this was found.
+    /// Manual is the mode a user reaches for precisely when something has already gone wrong, and
+    /// it went through the same skipped write as every other owner.
+    /// </remarks>
+    [Fact]
+    public void A_manual_duty_is_restated_like_any_other()
+    {
+        var h = Harness.Build(initialTemperature: 60f);
+        h.Loop.TryAcquire(h.Fan.Id, ControlOwnerKind.ManualOverride, ControlOwnershipRegistry.ManualClaimant);
+        Assert.True(h.Loop.TrySetRequestedDuty(
+            h.Fan.Id,
+            new Duty(30f),
+            ControlOwnershipRegistry.ManualClaimant));
+
+        for (var tick = 0; tick < 5; tick++)
+        {
+            h.Loop.Tick(Tick);
+        }
+
+        Assert.Equal(3, h.Fan.Writes.Count);
+        Assert.All(h.Fan.Writes, duty => Assert.Equal(30f, duty.Percent, precision: 3));
+    }
+
+    /// <summary>
+    /// Restating costs a write, and no tick spends more than one of them.
+    /// </summary>
+    /// <remarks>
+    /// The budget is the whole reason restatements are scheduled rather than done for every control
+    /// every tick. A duty write to a Nuvoton header takes about a tenth of a second and holds the
+    /// ISA bus while it does, so a boardful of fans restated together would spend half of every
+    /// tick in the write path with the sensor reads queued behind it.
+    /// </remarks>
+    [Fact]
+    public void No_more_than_one_steady_control_is_restated_in_a_tick()
+    {
+        var registry = new FakeSensorRegistry();
+        var temperature = registry.Add(new FakeSensor { Value = 60f });
+        var curve = new LinearCurve(
+            CurveId.New(),
+            "ramp",
+            temperature.Id,
+            minimumInput: 40f,
+            maximumInput: 80f,
+            minimumDuty: new Duty(0f),
+            maximumDuty: new Duty(100f));
+
+        var fans = Enumerable.Range(0, 4).Select(_ => registry.Add(new FakeControl())).ToArray();
+        var loop = new ControlLoop(registry, new ControlOwnershipRegistry(TimeProvider.System), TimeProvider.System);
+        loop.Configure(
+            [curve],
+            [.. fans.Select(fan => new ControlBinding(fan.Id)
+            {
+                CurveId = curve.Id,
+                MaximumStepUpPerSecond = 0f,
+                MaximumStepDownPerSecond = 0f,
+            })]);
+
+        // The first tick writes all of them, because none has a duty standing at it yet.
+        Assert.Equal(4, loop.Tick(Tick).ControlsWritten);
+
+        for (var tick = 0; tick < 10; tick++)
+        {
+            Assert.True(loop.Tick(Tick).ControlsWritten <= 1);
+        }
+
+        // And every one of them was restated over that round rather than a single fan being
+        // restated repeatedly while the rest went untouched.
+        Assert.All(fans, fan => Assert.True(fan.Writes.Count > 1));
     }
 
     [Fact]

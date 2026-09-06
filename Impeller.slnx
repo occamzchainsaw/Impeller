@@ -15,5 +15,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Impeller.Core.Engine.Tests/Impeller.Core.Engine.Tests.csproj" />
+    <Project Path="tests/Impeller.Hardware.Lhm.Tests/Impeller.Hardware.Lhm.Tests.csproj" />
   </Folder>
 </Solution>

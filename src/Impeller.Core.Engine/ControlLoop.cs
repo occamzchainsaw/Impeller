@@ -64,8 +64,31 @@ public sealed class ControlLoop
         _ownership.OwnershipChanged += (_, change) => ForgetRequestedDuty(change.ControlId);
     }
 
+    /// <summary>
+    /// How far a duty must move before it is written for having changed.
+    /// </summary>
+    /// <remarks>
+    /// Below this the write would land on the same value at the hardware, so it is left for the
+    /// restatement schedule to make rather than made twice.
+    /// </remarks>
+    private const float WriteThreshold = 0.01f;
+
+    /// <summary>
+    /// The longest a control's duty may stand at the hardware without being written again.
+    /// </summary>
+    /// <remarks>
+    /// A floor rather than a period: at most one control is restated per tick, so with several fans
+    /// a full round takes as many ticks as there are fans. Short enough that a header firmware has
+    /// reclaimed comes back before a person notices it, long enough that the restatements are a
+    /// rounding error next to the work a tick already does.
+    /// </remarks>
+    private static readonly TimeSpan RestatementInterval = TimeSpan.FromSeconds(2);
+
     private readonly Lock _requestGate = new();
     private readonly Dictionary<SensorId, RequestedDuty> _requestedDuties = [];
+
+    /// <summary>How long since each control was last written, for the restatement schedule.</summary>
+    private readonly Dictionary<SensorId, TimeSpan> _sinceWrite = [];
 
     /// <summary>Controls currently handed back because nothing is driving them.</summary>
     /// <remarks>
@@ -566,6 +589,7 @@ public sealed class ControlLoop
         }
 
         var curveOutputs = EvaluateCurves(elapsed);
+        var restate = SelectForRestatement(elapsed);
         var written = 0;
         var faults = new Dictionary<SensorId, Exception>();
 
@@ -617,6 +641,18 @@ public sealed class ControlLoop
                 {
                     written++;
                 }
+                else if (binding.ControlId == restate
+                    && _commandedDuties.TryGetValue(binding.ControlId, out var held))
+                {
+                    // Holding a duty is something the engine keeps doing to the hardware, not
+                    // something it decides once and remembers. A sensor that has gone quiet is the
+                    // longest a header ever goes without a fresh value, which makes it the case
+                    // most likely to be reclaimed, so a held duty is restated like any other.
+                    if (TryWrite(binding, control, held, faults))
+                    {
+                        written++;
+                    }
+                }
 
                 continue;
             }
@@ -641,23 +677,23 @@ public sealed class ControlLoop
                 ? gate.Resolve(limited, current, pairedRpm, elapsed)
                 : binding.ApplySlewLimit(current, limited, elapsed);
 
-            // Skip writes that would change nothing. Some Super I/O chips are slow to write,
-            // and at one tick a second the redundant traffic adds up.
-            if (_commandedDuties.ContainsKey(binding.ControlId)
-                && Duty.Distance(current, next) < 0.01f)
+            // A duty that has moved is written now; one that has not is written when its turn
+            // comes round. Skipping the unchanged write entirely is what this replaces, and it was
+            // wrong: a duty is not a setting the hardware stores, it is a claim on a header that
+            // lapses as soon as nothing restates it. Board firmware takes an unattended header back
+            // and drives it from its own curve, and the failure is silent in the worst way - the
+            // engine goes on reporting the duty it last wrote, so the fans run up under load while
+            // every screen in the shell reads 35%. A machine sitting at a steady temperature is the
+            // worst case rather than the safest one, because a curve whose output is not moving is
+            // a header nothing is touching.
+            if (Duty.Distance(current, next) >= WriteThreshold
+                || !_commandedDuties.ContainsKey(binding.ControlId)
+                || binding.ControlId == restate)
             {
-                continue;
-            }
-
-            try
-            {
-                control.Write(next);
-                _commandedDuties[binding.ControlId] = next;
-                written++;
-            }
-            catch (Exception ex)
-            {
-                faults[binding.ControlId] = ex;
+                if (TryWrite(binding, control, next, faults))
+                {
+                    written++;
+                }
             }
         }
 
@@ -696,6 +732,83 @@ public sealed class ControlLoop
         }
 
         return outputs;
+    }
+
+    /// <summary>
+    /// Chooses the one control whose standing duty is restated to the hardware this tick.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// One per tick rather than all of them, because a write is not free. On the Nuvoton parts this
+    /// runs on, a single duty write takes about a tenth of a second: the driver opens a fan
+    /// configuration phase, sleeps, sets the manual-mode bit and the value, commits, and sleeps
+    /// again — all of it holding the ISA bus that sensor reads also have to take. Restating six
+    /// headers every tick would spend half of every second in that path and leave the readings
+    /// fighting the writes for the bus.
+    /// </para>
+    /// <para>
+    /// So the restatements are spread out. The control that has gone longest without a write goes
+    /// first, which needs no ordering from the binding collection and self-corrects around whatever
+    /// the change-driven writes happen to have covered already. With one board's worth of fans that
+    /// puts a full round at a few seconds — long enough to be cheap, short enough that a header
+    /// firmware has taken back is reclaimed before anyone hears it.
+    /// </para>
+    /// </remarks>
+    /// <returns>The control to restate, or <see cref="SensorId.None"/> when none is due.</returns>
+    private SensorId SelectForRestatement(TimeSpan elapsed)
+    {
+        var oldest = SensorId.None;
+        var longest = RestatementInterval;
+
+        foreach (var controlId in _bindings.Keys)
+        {
+            // A control the engine has not commanded has nothing to restate, and one that is
+            // resting has deliberately been handed back to firmware.
+            if (!_commandedDuties.ContainsKey(controlId) || _resting.Contains(controlId))
+            {
+                _sinceWrite.Remove(controlId);
+                continue;
+            }
+
+            var age = _sinceWrite.GetValueOrDefault(controlId) + elapsed;
+            _sinceWrite[controlId] = age;
+
+            if (age >= longest)
+            {
+                longest = age;
+                oldest = controlId;
+            }
+        }
+
+        return oldest;
+    }
+
+    /// <summary>
+    /// Writes a duty to the hardware and records it as the duty now standing at that control.
+    /// </summary>
+    /// <remarks>
+    /// A write that throws is collected rather than raised: one header that has stopped answering
+    /// must not cost every other fan on the board its tick.
+    /// </remarks>
+    /// <returns>Whether the hardware accepted the write.</returns>
+    private bool TryWrite(
+        ControlBinding binding,
+        IControl control,
+        Duty duty,
+        Dictionary<SensorId, Exception> faults)
+    {
+        try
+        {
+            control.Write(duty);
+            _commandedDuties[binding.ControlId] = duty;
+            _sinceWrite[binding.ControlId] = TimeSpan.Zero;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            faults[binding.ControlId] = ex;
+            return false;
+        }
     }
 
     /// <summary>

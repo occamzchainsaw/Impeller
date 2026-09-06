@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <!-- LibreHardwareMonitor drives Windows-only kernel/driver interfaces. -->
@@ -8,6 +8,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Impeller.Core.Abstractions\Impeller.Core.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Impeller.Hardware.Lhm.Tests" />
   </ItemGroup>
 
   <ItemGroup>
