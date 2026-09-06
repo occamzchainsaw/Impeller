@@ -1,6 +1,7 @@
 using H.NotifyIcon;
 using Impeller.App.ViewModels.Engine;
 using Impeller.Platform.Windows;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
@@ -55,7 +56,7 @@ public sealed class TrayIcon : IDisposable
         _icon.ForceCreate();
 
         _connection.PropertyChanged += OnConnectionChanged;
-        _window.Closed += OnWindowClosed;
+        _window.AppWindow.Closing += OnWindowClosing;
 
         UpdateToolTip();
     }
@@ -64,7 +65,7 @@ public sealed class TrayIcon : IDisposable
     public void Dispose()
     {
         _connection.PropertyChanged -= OnConnectionChanged;
-        _window.Closed -= OnWindowClosed;
+        _window.AppWindow.Closing -= OnWindowClosing;
         _icon.Dispose();
     }
 
@@ -84,17 +85,30 @@ public sealed class TrayIcon : IDisposable
     /// Hides the window instead of letting it close, unless the user asked to exit.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The engine is untouched either way. What this preserves is the icon, and with it the only
     /// visible evidence that the fans are still being managed.
+    /// </para>
+    /// <para>
+    /// <c>AppWindow.Closing</c>, not <c>Window.Closed</c>. This was written against Closed and
+    /// setting <c>WindowEventArgs.Handled</c>, which reads exactly like a cancel and is not one:
+    /// Closed is raised to say the window has already gone, and nothing consults that flag. So the
+    /// close went through, the process ended, and the tray icon this class exists to keep alive
+    /// went with it - the one behaviour the whole file is written to prevent.
+    /// </para>
+    /// <para>
+    /// Closing is the cancellable one, and it is raised for a real exit too, which is what
+    /// <see cref="_exiting"/> is for.
+    /// </para>
     /// </remarks>
-    private void OnWindowClosed(object sender, WindowEventArgs args)
+    private void OnWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
     {
         if (_exiting)
         {
             return;
         }
 
-        args.Handled = true;
+        args.Cancel = true;
         _window.AppWindow.Hide();
     }
 
