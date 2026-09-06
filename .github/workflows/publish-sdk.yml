@@ -7,8 +7,10 @@
 #
 #   git tag sdk-v0.1.0 && git push origin sdk-v0.1.0
 #
-# Needs one secret: NUGET_API_KEY, from nuget.org -> API Keys. Scope it to push for
-# Impeller.Plugins.* rather than to the whole account.
+# There is no API key. nuget.org issues a one-hour key in exchange for a signed token GitHub mints
+# for this specific repository and this specific workflow file, so there is no long-lived secret to
+# leak, rotate or forget. It also means renaming this file breaks publishing until the policy on
+# nuget.org is updated to match — which is the point of it being named there.
 
 name: Publish SDK
 
@@ -21,6 +23,11 @@ on:
 jobs:
   publish:
     runs-on: windows-latest
+
+    permissions:
+      # Without this the OIDC token request fails silently and the login step gets no key.
+      id-token: write
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -37,8 +44,8 @@ jobs:
               -getProperty:Version -p:Configuration=Release -v:q).Trim()
 
           if ($tag -ne $version) {
-              # Worth stopping for. A version pushed to nuget.org can never be replaced or reused -
-              # only unlisted - so publishing the wrong number burns it permanently.
+              # Worth stopping for. A version pushed to nuget.org can never be replaced or reused,
+              # only unlisted, so publishing the wrong number burns it permanently.
               throw "tag $tag does not match the SDK version $version"
           }
 
@@ -46,21 +53,25 @@ jobs:
         run: dotnet test Impeller.slnx -c Release --nologo
 
       # The sample builds against the packed package rather than a project reference, so this proves
-      # the thing about to be published is actually usable by somebody outside this repository.
+      # the thing about to be published is usable by somebody outside this repository.
       - name: Pack, and build the sample against the result
         shell: pwsh
         run: ./scripts/pack-sdk.ps1
 
-      - name: Push to nuget.org
-        shell: pwsh
-        env:
-          KEY: ${{ secrets.NUGET_API_KEY }}
-        run: |
-          if (-not $env:KEY) { throw 'NUGET_API_KEY is not set on this repository' }
+      # Last, and deliberately: the key it hands back lives for an hour, so asking for it before a
+      # slow build risks it expiring before the push.
+      - name: Get a short-lived key from nuget.org
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ secrets.NUGET_USER }}
 
+      - name: Push
+        shell: pwsh
+        run: |
           # --skip-duplicate so a re-run after a partial failure is not itself a failure: the
           # abstractions package may already be up when the SDK push is retried.
           dotnet nuget push artifacts/packages/*.nupkg `
               --source https://api.nuget.org/v3/index.json `
-              --api-key $env:KEY `
+              --api-key ${{ steps.login.outputs.NUGET_API_KEY }} `
               --skip-duplicate
