@@ -44,9 +44,13 @@ $stage = Join-Path $root "artifacts/publish/$version"
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
 
+# Required lists the files whose absence is silent. Impeller.pri is there because publishing to a
+# folder used to drop it: the app started, got as far as its first window, and died inside
+# LoadComponent with nothing in the Event Log but Microsoft.UI.Xaml.dll and 0xc000027b. A missing
+# file that produces a stowed WinRT exception is worth a line of script.
 $apps = @(
-    @{ Name = 'Impeller-Engine'; Project = 'src/Impeller.EngineService/Impeller.EngineService.csproj'; Exe = 'Impeller.EngineService.exe' }
-    @{ Name = 'Impeller';        Project = 'src/Impeller.App.Shell/Impeller.App.Shell.csproj';         Exe = 'Impeller.exe' }
+    @{ Name = 'Impeller-Engine'; Project = 'src/Impeller.EngineService/Impeller.EngineService.csproj'; Required = @('Impeller.EngineService.exe', 'appsettings.json') }
+    @{ Name = 'Impeller';        Project = 'src/Impeller.App.Shell/Impeller.App.Shell.csproj';         Required = @('Impeller.exe', 'Impeller.pri', 'Microsoft.UI.Xaml.dll', 'Assets/AppIcon.ico') }
 )
 
 foreach ($app in $apps) {
@@ -64,11 +68,10 @@ foreach ($app in $apps) {
 
     if ($LASTEXITCODE -ne 0) { throw "publish failed: $($app.Name)" }
 
-    # The one check worth making: the executable a person is told to run has to be in the folder
-    # under the name the instructions use.
-    $exe = Join-Path $out $app.Exe
-    if (-not (Test-Path $exe)) { throw "$($app.Exe) is missing from $out" }
+    $missing = $app.Required | Where-Object { -not (Test-Path (Join-Path $out $_)) }
+    if ($missing) { throw "missing from $out : $($missing -join ', ')" }
 
+    $exe = Join-Path $out $app.Required[0]
     $size = [math]::Round(((Get-ChildItem $out -Recurse -File | Measure-Object Length -Sum).Sum / 1MB), 1)
     Write-Host ("  {0}  ({1} MB)" -f $exe, $size) -ForegroundColor DarkGray
 

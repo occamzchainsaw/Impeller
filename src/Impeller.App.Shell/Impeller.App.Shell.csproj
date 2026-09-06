@@ -50,6 +50,30 @@
     <PublishTrimmed>false</PublishTrimmed>
   </PropertyGroup>
 
+  <!--
+    Publishing to a folder drops the project's own .pri, and nothing says so. dotnet publish -o
+    copies the framework PRIs - Microsoft.UI.pri and friends - but the one holding this app's
+    compiled XAML is copied by a target keyed to the build output directory, which a custom publish
+    directory is not. The published app then starts, gets as far as building its first window, and
+    dies inside LoadComponent with a XamlParseException wrapped in a stowed WinRT exception: the
+    Event Log names Microsoft.UI.Xaml.dll and exception code 0xc000027b, and says nothing about a
+    missing file.
+
+    Debug never showed it because bin\Debug is the build output directory, so the file is simply
+    there. Only a published folder is affected, which makes this exactly the kind of fault that
+    ships.
+  -->
+  <Target Name="PublishProjectPri" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish
+        Include="$(ProjectPriFullPath)"
+        Condition="'$(ProjectPriFullPath)' != '' And Exists('$(ProjectPriFullPath)')">
+        <RelativePath>$(ProjectPriFileName)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+
   <ItemGroup>
     <Manifest Include="$(ApplicationManifest)" />
     <Content Include="Assets\AppIcon.ico" CopyToOutputDirectory="PreserveNewest" />
