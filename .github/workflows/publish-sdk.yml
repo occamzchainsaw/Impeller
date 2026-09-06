@@ -1,0 +1,66 @@
+# Publishes Impeller.Plugins.Sdk and Impeller.Plugins.Abstractions to nuget.org.
+#
+# Separate from release.yml and separately tagged, because the SDK is versioned independently of the
+# engine on purpose: a plugin is built once against an SDK version and keeps working across engine
+# updates. Tying them together would invalidate every plugin's package reference on every engine
+# release, for nothing.
+#
+#   git tag sdk-v0.1.0 && git push origin sdk-v0.1.0
+#
+# Needs one secret: NUGET_API_KEY, from nuget.org -> API Keys. Scope it to push for
+# Impeller.Plugins.* rather than to the whole account.
+
+name: Publish SDK
+
+on:
+  push:
+    tags:
+      - "sdk-v*"
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Check the tag matches the packages' version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}" -replace '^sdk-v', ''
+          $version = (dotnet msbuild src/Impeller.Plugins.Sdk/Impeller.Plugins.Sdk.csproj `
+              -getProperty:Version -p:Configuration=Release -v:q).Trim()
+
+          if ($tag -ne $version) {
+              # Worth stopping for. A version pushed to nuget.org can never be replaced or reused -
+              # only unlisted - so publishing the wrong number burns it permanently.
+              throw "tag $tag does not match the SDK version $version"
+          }
+
+      - name: Test
+        run: dotnet test Impeller.slnx -c Release --nologo
+
+      # The sample builds against the packed package rather than a project reference, so this proves
+      # the thing about to be published is actually usable by somebody outside this repository.
+      - name: Pack, and build the sample against the result
+        shell: pwsh
+        run: ./scripts/pack-sdk.ps1
+
+      - name: Push to nuget.org
+        shell: pwsh
+        env:
+          KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if (-not $env:KEY) { throw 'NUGET_API_KEY is not set on this repository' }
+
+          # --skip-duplicate so a re-run after a partial failure is not itself a failure: the
+          # abstractions package may already be up when the SDK push is retried.
+          dotnet nuget push artifacts/packages/*.nupkg `
+              --source https://api.nuget.org/v3/index.json `
+              --api-key $env:KEY `
+              --skip-duplicate

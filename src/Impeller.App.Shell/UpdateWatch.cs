@@ -23,12 +23,12 @@ internal static partial class UpdateWatch
 {
     /// <summary>Where releases are published.</summary>
     /// <remarks>
-    /// Until this repository is public the request 404s, which the feed reports as "no information"
+    /// Before the first release exists the request 404s, which the feed reports as "no information"
     /// like any other failure. That is the intended behaviour rather than a placeholder to remember:
-    /// nothing here needs changing on the day it is published.
+    /// nothing here needs changing on the day the first release is tagged.
     /// </remarks>
     private const string Owner = "occamzchainsaw";
-    private const string Repository = "impeller";
+    private const string Repository = "Impeller";
 
     /// <summary>
     /// Long enough to be out of the way.

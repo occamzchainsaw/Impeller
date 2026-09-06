@@ -25,9 +25,24 @@
 
     <Product>Impeller</Product>
     <Company>Impeller</Company>
-    <Authors>Impeller contributors</Authors>
-    <Copyright>Copyright (c) Impeller contributors</Copyright>
+    <Authors>occamzchainsaw</Authors>
+    <Copyright>Public domain (Unlicense)</Copyright>
     <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/occamzchainsaw/Impeller</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/occamzchainsaw/Impeller</PackageProjectUrl>
+
+    <!--
+      Public domain. Set here rather than per-project so a package added later cannot end up
+      published under different terms than the repository it came from, purely by omission.
+    -->
+    <PackageLicenseExpression>Unlicense</PackageLicenseExpression>
+
+    <!--
+      Off by default, on for the two plugin packages only. The engine, the shell and the hardware
+      backend are applications; a stray package of one of them would be a name claimed by accident
+      on nuget.org, and a claimed name cannot be given back.
+    -->
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <!--

@@ -1,0 +1,50 @@
+# Builds and tests every push and every pull request.
+#
+# Separate from release.yml on purpose: this runs constantly and must stay fast, while releasing is
+# rare, slow, and allowed to do heavy things like compiling a 140 MB installer.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    # Windows, and not a choice: WinUI's XAML compiler, the Windows App SDK and the
+    # LibreHardwareMonitor backend all need it.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      # Keyed on the lock-free restore inputs, since this repo pins versions in the csproj files
+      # rather than a packages.lock.json.
+      - name: Cache NuGet
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Build.props') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Build
+        # ContinuousIntegrationBuild turns warnings into errors, which Directory.Build.props sets up
+        # deliberately: locally a warning should not stop a work in progress, and here it should.
+        run: dotnet build Impeller.slnx -c Release --nologo -p:ContinuousIntegrationBuild=true
+
+      - name: Test
+        run: dotnet test Impeller.slnx -c Release --nologo --no-build
+
+      # The SDK is published to nuget.org, so a plugin author restores it as a package rather than
+      # referencing the project. Packing here proves the package still builds; the sample proves it
+      # is still usable, which is not the same question and is the one that has actually failed.
+      - name: Pack the SDK and build the sample against it
+        shell: pwsh
+        run: ./scripts/pack-sdk.ps1
