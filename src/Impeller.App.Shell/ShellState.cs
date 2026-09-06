@@ -18,4 +18,7 @@ internal static class ShellState
 
     /// <summary>Where the window's size and position are remembered between runs.</summary>
     public static string WindowFile => Path.Combine(Root, "window.json");
+
+    /// <summary>Where the window's own preferences live, separate from anything the engine owns.</summary>
+    public static string SettingsFile => Path.Combine(Root, "settings.json");
 }

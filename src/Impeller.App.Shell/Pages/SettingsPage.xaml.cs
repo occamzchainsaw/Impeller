@@ -1,5 +1,6 @@
 using Impeller.App.ViewModels;
 using Impeller.App.ViewModels.Shell;
+using Impeller.App.ViewModels.Updates;
 using Impeller.Platform.Windows;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -39,6 +40,10 @@ public sealed partial class SettingsPage : Page
             enabled,
             minimised ? ShellStartup.MinimisedSwitch : null);
 
+        ViewModel.Releases = App.GetService<IReleaseFeed>();
+        ViewModel.Settings = App.GetService<ShellSettingsStore>();
+        ViewModel.OpenLink = Open;
+
         Loaded += async (_, _) => await ViewModel.LoadAsync().ConfigureAwait(true);
         Unloaded += (_, _) => ViewModel.Dispose();
     }
@@ -67,6 +72,10 @@ public sealed partial class SettingsPage : Page
 
     /// <summary>Shows something only while a flag is set.</summary>
     public static Visibility WhenTrue(bool value) => value ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Shows the release link only once a check has actually found a release.</summary>
+    public static Visibility WhenFound(ReleaseInfo? release) =>
+        release is null ? Visibility.Collapsed : Visibility.Visible;
 
     /// <summary>
     /// Where the configurations are kept, said rather than merely shown.
@@ -110,5 +119,20 @@ public sealed partial class SettingsPage : Page
         var package = new DataPackage();
         package.SetText(text);
         Clipboard.SetContent(package);
+    }
+
+    /// <summary>
+    /// Hands a link to whatever the user browses with.
+    /// </summary>
+    /// <remarks>
+    /// Fire and forget, and swallowing its own failure: a machine with no default browser is not a
+    /// reason for a fan controller to show an error, and the version is on the page either way.
+    /// </remarks>
+    private static void Open(string url)
+    {
+        if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            _ = Windows.System.Launcher.LaunchUriAsync(uri);
+        }
     }
 }

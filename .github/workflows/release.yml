@@ -1,0 +1,73 @@
+# Builds the installer and publishes it as a GitHub release.
+#
+# INERT UNTIL THIS REPOSITORY HAS A REMOTE. It is checked in now so the release process is written
+# down while the reasoning is fresh, not so it runs. Nothing here has ever executed.
+#
+# Triggered by pushing a tag: git tag v0.2.0 && git push origin v0.2.0
+# The tag is the version. Directory.Build.props is the version. Keeping those two in step is manual,
+# and the guard below is what stops them drifting.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # Windows, and not negotiable: WinUI's XAML compiler and the Windows App SDK do not build
+    # anywhere else, and Inno Setup is a Windows program.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Check the tag matches the version in the build
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}" -replace '^v', ''
+          $version = (dotnet msbuild src/Impeller.EngineService/Impeller.EngineService.csproj `
+              -getProperty:Version -p:Configuration=Release -v:q).Trim()
+
+          if ($tag -ne $version) {
+              # Stopping here is the point. A release tagged v0.2.0 whose binaries report 0.1.0
+              # cannot be told apart from a botched download, and the update check would offer it
+              # to everyone for ever because it never compares as installed.
+              throw "tag $tag does not match the built version $version — bump Directory.Build.props"
+          }
+
+      - name: Test
+        run: dotnet test Impeller.slnx -c Release --nologo
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build the installer
+        shell: pwsh
+        run: ./scripts/pack-installer.ps1
+
+      - name: Publish the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $files = Get-ChildItem artifacts/installer -File | ForEach-Object { $_.FullName }
+          gh release create "${{ github.ref_name }}" $files `
+              --title "Impeller ${{ github.ref_name }}" `
+              --generate-notes
+
+# Not solved here, and deliberately left as a note rather than a broken step:
+#
+# SIGNING. The installer is unsigned, so SmartScreen warns on first run and will keep warning until
+# a signed publisher builds reputation. Azure Artifact Signing (formerly Trusted Signing) is about
+# $10/month and now accepts self-employed individuals, but only in the USA and Canada. Nothing here
+# is blocked on it; users see one extra "More info -> Run anyway".

@@ -8,9 +8,31 @@ answers the follow-up questions.
 
 ---
 
+## The short way: run the installer
+
+`Impeller-<version>-win-x64-Setup.exe`, about 140 MB. Run it, choose a folder, done. It needs
+administrator, because the engine is a Windows service and registering one does.
+
+It installs both halves into the folder you pick — `Engine\` and `App\` — registers the service,
+starts it, and puts an entry in **Settings → Apps** so it uninstalls like anything else.
+
+**Upgrading is running the newer installer.** It remembers where the last one went, stops the
+service, replaces the binaries, re-registers at the same path and starts it again. Your
+configurations, your fan names, your sensor identity map and your plugin approvals are all left
+alone — they were written at runtime, and the installer only removes what it put there.
+
+**Uninstalling** stops and unregisters the service, removes both folders, and then *asks* whether to
+delete your configurations too. It defaults to keeping them, because `sensor-identity.json` cannot be
+reconstructed by hand and losing it means every curve points at the wrong fan.
+
+The rest of this page is for people who want to know exactly what that did, or who would rather do
+it by hand.
+
+---
+
 ## What you are installing
 
-Two folders, from `scripts\publish.ps1` or from a release:
+Two folders, from the installer, from `scripts\publish.ps1`, or from a release:
 
 | Folder | Contains | Roughly |
 | --- | --- | --- |
@@ -21,8 +43,17 @@ Both are self-contained: they carry their own copy of .NET, and the window carri
 the Windows App SDK. Nothing has to be installed first, and nothing on the machine can be broken by
 a runtime update. That is where the size goes.
 
-Neither is signed, so Windows SmartScreen will warn about both the first time. There is no way
-around that short of a code-signing certificate.
+Neither is signed, so Windows SmartScreen will warn about both the first time — **More info → Run
+anyway**. There is no way around that short of a code-signing certificate.
+
+### Keeping the two halves in step
+
+They talk over a named pipe and agree a protocol version before anything else happens. Update one
+without the other far enough and the window will say **Engine version mismatch** in the status
+strip, with a notification naming which half is behind — rather than connecting and then failing one
+operation at a time, which is what it used to do.
+
+The installer always does both, so this only comes up if you replace files by hand.
 
 ---
 
@@ -161,8 +192,21 @@ starts at boot, before any user logs in, and keeps going while you are logged ou
 
 ### Where the window keeps its state
 
-`%LocalAppData%\Impeller` — window position and size, and the shell's own log. Nothing in here
-matters; deleting it costs you a window that opens at its default size.
+`%LocalAppData%\Impeller` — window position and size, its own preferences, and the shell's own log.
+Nothing in here matters; deleting it costs you a window that opens at its default size.
+
+### Update checking
+
+**Settings → Version and updates.** On by default. Twenty seconds after startup it asks the public
+releases page whether there is a newer version, and tells you if there is.
+
+It is one unauthenticated request and it sends nothing: no identifier, no version, nothing that
+separates you from anyone else asking. It never downloads or installs anything — updating is always
+you running the installer, because the engine half needs administrator and a program running as you
+cannot finish that job anyway.
+
+Every failure is silence. Offline, behind a proxy, rate-limited from a shared address: all of them
+mean "no information", and none of them is worth an error message on a fan controller.
 
 ---
 

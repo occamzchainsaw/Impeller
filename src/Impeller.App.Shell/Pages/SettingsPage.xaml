@@ -228,6 +228,55 @@
                 </StackPanel>
             </Expander>
 
+            <!--  Which version this is, and whether there is a newer one.  -->
+            <Expander
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Stretch"
+                Header="Version and updates">
+                <StackPanel Spacing="12">
+                    <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="{x:Bind ViewModel.AppVersion}" />
+
+                    <!--
+                        Says exactly what leaves the machine, because "checks for updates" is a
+                        phrase people have learned to distrust for reasons that do not apply here.
+                    -->
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="Impeller can ask the public releases page whether a newer version exists. It is one request and it sends nothing about you or this machine — no identifier, no version, nothing that separates you from anyone else asking. It never downloads or installs anything; updating is always you running the installer."
+                        TextWrapping="Wrap" />
+
+                    <ToggleSwitch
+                        Header="Check when Impeller starts"
+                        IsOn="{x:Bind ViewModel.ChecksForUpdates, Mode=TwoWay}"
+                        OffContent="No"
+                        OnContent="Yes" />
+
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Command="{x:Bind ViewModel.CheckForUpdatesCommand}" Content="Check now" />
+                        <HyperlinkButton
+                            Command="{x:Bind ViewModel.OpenReleaseCommand}"
+                            Content="Open the release page"
+                            Visibility="{x:Bind local:SettingsPage.WhenFound(ViewModel.Available), Mode=OneWay}" />
+                    </StackPanel>
+
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="{x:Bind ViewModel.UpdateStatus, Mode=OneWay}"
+                        TextWrapping="Wrap"
+                        Visibility="{x:Bind local:SettingsPage.HasTextVisibility(ViewModel.UpdateStatus), Mode=OneWay}" />
+
+                    <!--
+                        The engine is the half that needs administrator, and a window updated
+                        without it stops being able to talk to it. The installer does both.
+                    -->
+                    <TextBlock
+                        FontSize="12"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="The installer updates the engine service and this window together. Updating one without the other leaves them unable to talk, which Impeller will tell you about rather than leaving you to work out."
+                        TextWrapping="Wrap" />
+                </StackPanel>
+            </Expander>
+
             <!--  The document that goes on a bug report.  -->
             <Expander
                 HorizontalAlignment="Stretch"

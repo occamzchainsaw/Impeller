@@ -2,6 +2,7 @@ using Impeller.App.ViewModels;
 using Impeller.App.ViewModels.Engine;
 using Impeller.App.ViewModels.Notifications;
 using Impeller.App.ViewModels.Shell;
+using Impeller.App.ViewModels.Updates;
 using Impeller.Platform.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -95,6 +96,11 @@ public partial class App : Application, IDisposable
         // page that raised it, and a centre owned by a page would be discarded with it.
         services.AddSingleton<NotificationCenter>();
 
+        // Shared between the startup check and the Settings page's button, so one HttpClient serves
+        // both rather than each page building its own.
+        services.AddSingleton(_ => UpdateWatch.Feed());
+        services.AddSingleton(_ => new ShellSettingsStore(ShellState.SettingsFile));
+
         // Singleton for the same reason - it is the strip at the foot of the window, which does not
         // belong to any page and must not be rebuilt when one is navigated away from.
         services.AddSingleton(sp => new ShellStatusViewModel(
@@ -147,6 +153,15 @@ public partial class App : Application, IDisposable
         // Started before the window so the first page to open finds a connection already in
         // progress rather than one that begins when it happens to be looked at.
         connection.Start();
+
+        // After the connection and before the window, but it waits twenty seconds before doing
+        // anything, so it is behind both.
+        UpdateWatch.Start(
+            GetService<IReleaseFeed>(),
+            GetService<ShellSettingsStore>(),
+            GetService<NotificationCenter>(),
+            typeof(App).Assembly.GetName().Version?.ToString(3) ?? "0.0.0",
+            logger);
 
         try
         {

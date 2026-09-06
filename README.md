@@ -43,25 +43,21 @@ window — or you closing it, or Windows updating it — cannot leave your fans 
 
 ## Installing it
 
-There is no installer and no package manager. Two folders, one command.
+Download `Impeller-<version>-win-x64-Setup.exe` and run it. Choose where it goes; it installs the
+service and the window together, registers the service, and starts it.
 
-1. Download and unzip. You get two folders: **Impeller-Engine** and **Impeller**.
-2. Put **Impeller-Engine** somewhere permanent — `C:\Program Files\Impeller Engine` is the obvious
-   place. It will be registered as a service by its path, so moving it later means re-registering
-   it.
-3. Open a terminal **as administrator** in that folder and run:
+It needs administrator once, because registering a Windows service does. The window itself never
+asks for elevation, and never will — it does not touch the hardware.
 
-   ```
-   .\Impeller.EngineService.exe install
-   .\Impeller.EngineService.exe start
-   ```
+Upgrading is running the newer installer: it finds the previous install, replaces the binaries, and
+leaves every configuration, fan name and plugin approval exactly where it was. Uninstalling is in
+**Settings → Apps**, and it asks before deleting anything you made.
 
-   That is the only time you need administrator rights.
-4. Put the **Impeller** folder wherever you like and run `Impeller.exe`. It is an ordinary app; it
-   never asks for elevation.
+Unsigned, so SmartScreen will want a **More info → Run anyway** the first time.
 
-The full version of this — where state is kept, starting the window with Windows, upgrading,
-and removing it completely — is in **[docs/installing.md](docs/installing.md)**.
+If you would rather do it by hand, or want to know exactly what the installer did — where state is
+kept, what starts when, how to remove all of it — that is
+**[docs/installing.md](docs/installing.md)**.
 
 ---
 

@@ -3,7 +3,9 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Impeller.App.ViewModels.Engine;
 using Impeller.App.ViewModels.Notifications;
+using Impeller.App.ViewModels.Shell;
 using Impeller.App.ViewModels.Tuning;
+using Impeller.App.ViewModels.Updates;
 using Impeller.Core.Abstractions;
 using Impeller.Core.Abstractions.Configuration;
 using Impeller.Ipc.Contracts;
@@ -87,6 +89,29 @@ public sealed partial class SettingsViewModel : EnginePageViewModel
     [ObservableProperty]
     public partial bool StartsMinimised { get; set; }
 
+    /// <summary>Which version of the window this is.</summary>
+    public string AppVersion { get; } =
+        typeof(SettingsViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+
+    /// <summary>
+    /// Whether to ask, on startup, if there is a newer release.
+    /// </summary>
+    /// <remarks>
+    /// One unauthenticated request that sends nothing about this machine. Worth saying on the page
+    /// rather than only here, because "checks for updates" is a phrase people have learned to
+    /// distrust for good reasons that do not apply to it.
+    /// </remarks>
+    [ObservableProperty]
+    public partial bool ChecksForUpdates { get; set; } = true;
+
+    /// <summary>What the last check found, or null when nothing has been found.</summary>
+    [ObservableProperty]
+    public partial ReleaseInfo? Available { get; private set; }
+
+    /// <summary>Something to show about the last check, whether or not it found anything.</summary>
+    [ObservableProperty]
+    public partial string UpdateStatus { get; private set; } = string.Empty;
+
     /// <summary>
     /// Asks the user for a FanControl configuration file.
     /// </summary>
@@ -120,6 +145,15 @@ public sealed partial class SettingsViewModel : EnginePageViewModel
     /// </remarks>
     public Func<bool, bool, bool>? WriteAutostart { get; set; }
 
+    /// <summary>Where to ask about releases. Null means the check is unavailable and says so.</summary>
+    public IReleaseFeed? Releases { get; set; }
+
+    /// <summary>Reads and writes the window's own preferences. Supplied by the shell.</summary>
+    public ShellSettingsStore? Settings { get; set; }
+
+    /// <summary>Opens a link in the browser. Supplied by the shell.</summary>
+    public Action<string>? OpenLink { get; set; }
+
     /// <inheritdoc />
     /// <remarks>
     /// The autostart flag is read here rather than in the constructor: the page wires its delegates
@@ -134,7 +168,66 @@ public sealed partial class SettingsViewModel : EnginePageViewModel
         _readingAutostart = true;
         StartsWithWindows = ReadAutostart?.Invoke() ?? false;
         StartsMinimised = ReadStartMinimised?.Invoke() ?? false;
+        ChecksForUpdates = Settings?.Read().CheckForUpdates ?? true;
         _readingAutostart = false;
+    }
+
+    /// <summary>Remembers the preference. Nothing is checked from here — the shell does that once.</summary>
+    partial void OnChecksForUpdatesChanged(bool value)
+    {
+        if (!_readingAutostart)
+        {
+            Settings?.Write(new ShellSettings(value));
+        }
+    }
+
+    /// <summary>
+    /// Asks now, whatever the preference says.
+    /// </summary>
+    /// <remarks>
+    /// Pressing the button is asking, so it does not consult the toggle: somebody who switched off
+    /// the background check and then wants to know is entitled to an answer.
+    /// </remarks>
+    [RelayCommand]
+    private async Task CheckForUpdatesAsync()
+    {
+        if (Releases is not { } feed)
+        {
+            UpdateStatus = "Update checking is not available in this build.";
+            return;
+        }
+
+        UpdateStatus = "Checking…";
+        Available = null;
+
+        var latest = await feed.LatestAsync().ConfigureAwait(true);
+
+        if (latest is null)
+        {
+            // Every failure arrives here as null, and none of them is worth naming: a person who
+            // cannot reach GitHub does not need this page to explain GitHub to them.
+            UpdateStatus = "Could not reach the release page. Nothing has changed on this machine.";
+            return;
+        }
+
+        if (!UpdateCheck.IsNewer(AppVersion, latest.Version))
+        {
+            UpdateStatus = $"Up to date. {AppVersion} is the latest release.";
+            return;
+        }
+
+        Available = latest;
+        UpdateStatus = $"{latest.Version} is available. You have {AppVersion}.";
+    }
+
+    /// <summary>Opens the release page for whatever the last check found.</summary>
+    [RelayCommand]
+    private void OpenRelease()
+    {
+        if (Available is { Url.Length: > 0 } release && OpenLink is { } open)
+        {
+            open(release.Url);
+        }
     }
 
     /// <summary>Registers or unregisters the shell.</summary>

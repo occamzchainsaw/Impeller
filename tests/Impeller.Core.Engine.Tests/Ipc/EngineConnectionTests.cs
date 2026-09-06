@@ -197,13 +197,15 @@ public sealed class EngineConnectionTests
     /// <summary>An engine that speaks the handshake and refuses this shell.</summary>
     private sealed class RefusingEngine
     {
+        /// <summary>What the shell announced, so a test can prove the hello actually crossed.</summary>
+        public ShellHello? Greeted { get; private set; }
+
         public Task<EngineHandshake> HelloAsync(ShellHello hello, CancellationToken cancellationToken = default)
         {
-            // The shell always sends CurrentVersion, so the refusal is provoked by an engine that
-            // claims to speak less than the shell does - which is exactly the real case: a service
-            // left behind by an update.
-            _ = hello;
+            Greeted = hello;
 
+            // The real shape of the common case: a service left behind by an update, speaking a
+            // lower protocol than the window that just connected to it.
             return Task.FromResult(new EngineHandshake(
                 false,
                 EngineRefusal.ProtocolTooNew,
@@ -217,7 +219,14 @@ public sealed class EngineConnectionTests
     /// <summary>An engine from before the handshake: it has every other verb and not this one.</summary>
     private sealed class AncientEngine
     {
+        private long _ticks;
+
         public Task<EngineStatus> GetStatusAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(new EngineStatus(EngineVersion, 1, DateTimeOffset.UnixEpoch, false, "."));
+            Task.FromResult(new EngineStatus(
+                EngineVersion,
+                Interlocked.Increment(ref _ticks),
+                DateTimeOffset.UnixEpoch,
+                false,
+                "."));
     }
 }
