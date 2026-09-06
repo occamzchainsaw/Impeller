@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Impeller.App.ViewModels.Engine;
+using Impeller.App.ViewModels.Notifications;
 using Impeller.Ipc.Contracts;
 
 namespace Impeller.App.ViewModels;
@@ -32,17 +33,23 @@ public sealed partial class ShellStatusViewModel : ObservableObject, IDisposable
     private static readonly TimeSpan StaleAfter = TimeSpan.FromSeconds(5);
 
     private readonly EngineConnection _connection;
+    private readonly NotificationCenter? _notifications;
     private readonly TimeProvider _time;
     private readonly ITimer _timer;
 
     private DateTimeOffset? _lastTickAt;
+    private bool _announcedMismatch;
     private bool _disposed;
 
-    public ShellStatusViewModel(EngineConnection connection, TimeProvider? time = null)
+    public ShellStatusViewModel(
+        EngineConnection connection,
+        NotificationCenter? notifications = null,
+        TimeProvider? time = null)
     {
         ArgumentNullException.ThrowIfNull(connection);
 
         _connection = connection;
+        _notifications = notifications;
         _time = time ?? TimeProvider.System;
 
         connection.PropertyChanged += OnConnectionChanged;
@@ -77,6 +84,7 @@ public sealed partial class ShellStatusViewModel : ObservableObject, IDisposable
         EngineConnectionState.Connected => "Connected",
         EngineConnectionState.Connecting => "Connecting",
         EngineConnectionState.NotInstalled => "Engine not installed",
+        EngineConnectionState.Incompatible => "Engine version mismatch",
         _ => "Engine not running",
     };
 
@@ -162,7 +170,35 @@ public sealed partial class ShellStatusViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(StateText));
         OnPropertyChanged(nameof(ConnectionText));
         OnPropertyChanged(nameof(IsConnected));
+        AnnounceMismatch();
         Refresh();
+    }
+
+    /// <summary>
+    /// Says once, loudly, that the two halves do not match.
+    /// </summary>
+    /// <remarks>
+    /// Every other connection state is a condition the strip reports continuously, and its whole
+    /// sentence lives in a tooltip nobody hovers. This one is different: it does not clear itself by
+    /// waiting, and the sentence names which half to update — so it goes where things needing action
+    /// go. Once per occurrence, because the retry loop re-enters the state on every attempt and a
+    /// notification per attempt would bury the rest of the history.
+    /// </remarks>
+    private void AnnounceMismatch()
+    {
+        if (_connection.State != EngineConnectionState.Incompatible)
+        {
+            _announcedMismatch = false;
+            return;
+        }
+
+        if (_announcedMismatch || _notifications is not { } notifications)
+        {
+            return;
+        }
+
+        _announcedMismatch = true;
+        notifications.Error("Impeller and its engine do not match.", _connection.StatusMessage);
     }
 
     private void OnTicked(object? sender, TickSnapshot tick) => NoteTick();

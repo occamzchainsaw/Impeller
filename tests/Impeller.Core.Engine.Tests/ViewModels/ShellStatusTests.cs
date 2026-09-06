@@ -20,7 +20,7 @@ public class ShellStatusTests
     private static (ShellStatusViewModel Status, FakeTimeProvider Clock) Rig()
     {
         var clock = new FakeTimeProvider(Start);
-        return (new ShellStatusViewModel(new EngineConnection(), clock), clock);
+        return (new ShellStatusViewModel(new EngineConnection(), notifications: null, clock), clock);
     }
 
     [Fact]

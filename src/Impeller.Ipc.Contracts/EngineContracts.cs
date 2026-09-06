@@ -1,4 +1,5 @@
-﻿using Impeller.Core.Abstractions;
+﻿using System.Diagnostics.CodeAnalysis;
+using Impeller.Core.Abstractions;
 using Impeller.Core.Abstractions.Configuration;
 using Impeller.Plugins.Abstractions;
 
@@ -16,6 +17,168 @@ public static class ImpellerPipe
     /// possible symptom for the actual problem.
     /// </remarks>
     public const string Name = "Impeller.Engine";
+}
+
+/// <summary>
+/// Which version of this contract the two halves of Impeller speak.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The shell and the engine are separate executables that can be updated separately, and until this
+/// existed a mismatch surfaced as individual calls failing — a window that connects, draws, and
+/// then behaves inexplicably. One number turns that into a sentence.
+/// </para>
+/// <para>
+/// <b>This is not the product version.</b> It moves only when the wire contract changes in a way
+/// that matters. Tying it to the release number would force everyone to update both halves for a
+/// change that touched neither.
+/// </para>
+/// </remarks>
+public static class EngineProtocol
+{
+    /// <summary>The protocol version this build speaks.</summary>
+    public const int CurrentVersion = 1;
+
+    /// <summary>
+    /// The oldest protocol version this build will talk to.
+    /// </summary>
+    /// <remarks>
+    /// Additive change does not move this: a field added to a record is simply never read by the
+    /// older end. It moves only when something one end relies on stops being true, and moving it is
+    /// a decision to refuse every build below it rather than a side effect of a refactor.
+    /// </remarks>
+    public const int MinimumVersion = 1;
+
+    /// <summary>
+    /// How long the shell waits for the engine to answer its hello.
+    /// </summary>
+    /// <remarks>
+    /// Short, because an engine that has accepted a pipe connection and still cannot answer one
+    /// trivial call within this is not going to serve a snapshot either — and the shell's retry
+    /// loop is better at waiting than a blocked await is.
+    /// </remarks>
+    public static TimeSpan HandshakeTimeout => TimeSpan.FromSeconds(5);
+
+    /// <summary>Whether this build can talk to an end claiming that protocol version.</summary>
+    public static bool IsSupported(int protocolVersion) =>
+        protocolVersion >= MinimumVersion && protocolVersion <= CurrentVersion;
+}
+
+/// <summary>What the shell says about itself when it connects.</summary>
+/// <param name="Version">The shell assembly's version, for the engine's log and for diagnostics.</param>
+/// <param name="ProtocolVersion">Which version of this contract it speaks.</param>
+public sealed record ShellHello(string Version, int ProtocolVersion);
+
+/// <summary>Why the engine will not serve this shell.</summary>
+public enum EngineRefusal
+{
+    /// <summary>No refusal; the two ends agree.</summary>
+    None = 0,
+
+    /// <summary>The shell is older than the engine is willing to serve.</summary>
+    ProtocolTooOld,
+
+    /// <summary>The shell is newer than the engine understands.</summary>
+    ProtocolTooNew,
+}
+
+/// <summary>The engine's answer to a shell's hello.</summary>
+/// <param name="Accepted">Whether the two ends can proceed.</param>
+/// <param name="Refusal">Why not, when they cannot.</param>
+/// <param name="Message">
+/// A whole sentence, written to be shown to a user unchanged. Always present — an accepted
+/// handshake carries the engine's greeting rather than an empty string, so nothing downstream has
+/// to invent something to say on the engine's behalf.
+/// </param>
+/// <param name="EngineVersion">Which engine answered, so a bug report names it.</param>
+/// <param name="ProtocolVersion">Which protocol version that engine speaks.</param>
+public sealed record EngineHandshake(
+    bool Accepted,
+    EngineRefusal Refusal,
+    string Message,
+    string EngineVersion,
+    int ProtocolVersion);
+
+/// <summary>
+/// The version check, as a pure function.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Deliberately the same shape as <see cref="PluginHandshake"/>, and for the same reason: one
+/// implementation means the message a developer reads and the message a user's log carries cannot
+/// drift apart.
+/// </para>
+/// <para>
+/// Unlike the plugin one, this check is <b>acted on by the shell rather than the engine</b>. The
+/// mismatch that actually happens is a window newer or older than the service beside it, and in one
+/// of those directions the engine has nothing to intercept — an older shell never calls this at
+/// all, and refusing it would need per-connection state the engine deliberately does not keep. So
+/// the engine answers honestly and the shell, which is the half with a person attached, decides
+/// what to do about the answer.
+/// </para>
+/// </remarks>
+public static class EngineHandshakeCheck
+{
+    /// <summary>
+    /// Checks a shell's hello against this build's protocol.
+    /// </summary>
+    /// <param name="hello">What the shell said about itself.</param>
+    /// <param name="engineVersion">The engine's version, for the answer to carry.</param>
+    /// <param name="refusal">The answer to send back, when it is a refusal.</param>
+    /// <returns>True when the two ends can proceed.</returns>
+    public static bool TryAccept(
+        ShellHello? hello,
+        string engineVersion,
+        [NotNullWhen(false)] out EngineHandshake? refusal)
+    {
+        if (hello is null)
+        {
+            refusal = Refuse(
+                EngineRefusal.ProtocolTooOld,
+                "This copy of Impeller did not say which version it speaks. Update Impeller.",
+                engineVersion);
+            return false;
+        }
+
+        if (hello.ProtocolVersion < EngineProtocol.MinimumVersion)
+        {
+            refusal = Refuse(
+                EngineRefusal.ProtocolTooOld,
+                $"This copy of Impeller speaks protocol version {hello.ProtocolVersion}; the engine "
+                + $"requires at least {EngineProtocol.MinimumVersion}. Update Impeller.",
+                engineVersion);
+            return false;
+        }
+
+        if (hello.ProtocolVersion > EngineProtocol.CurrentVersion)
+        {
+            // Refused rather than tolerated, for the reason the plugin channel refuses the same
+            // case: two ends disagreeing about what a call means is a fan driven on assumptions
+            // that were never both true.
+            refusal = Refuse(
+                EngineRefusal.ProtocolTooNew,
+                $"This copy of Impeller speaks protocol version {hello.ProtocolVersion}; the engine "
+                + $"speaks {EngineProtocol.CurrentVersion}. Update the Impeller engine service — the "
+                + "installer does both halves together.",
+                engineVersion);
+            return false;
+        }
+
+        refusal = null;
+        return true;
+    }
+
+    /// <summary>The answer for a shell this engine is happy to serve.</summary>
+    public static EngineHandshake Accept(string engineVersion) =>
+        new(
+            true,
+            EngineRefusal.None,
+            $"Engine {engineVersion}, protocol {EngineProtocol.CurrentVersion}.",
+            engineVersion,
+            EngineProtocol.CurrentVersion);
+
+    private static EngineHandshake Refuse(EngineRefusal refusal, string message, string engineVersion) =>
+        new(false, refusal, message, engineVersion, EngineProtocol.CurrentVersion);
 }
 
 /// <summary>What the engine is and how it is doing.</summary>
@@ -227,6 +390,16 @@ public sealed record ImportSummary(
 /// </remarks>
 public interface IEngineControl
 {
+    /// <summary>
+    /// Agrees a protocol version before anything else is asked.
+    /// </summary>
+    /// <remarks>
+    /// The first call a shell makes, and the only one it should make before the answer comes back.
+    /// An engine that predates this verb will fail the call as an unknown method, which is itself
+    /// the answer: that engine is older than this shell.
+    /// </remarks>
+    Task<EngineHandshake> HelloAsync(ShellHello hello, CancellationToken cancellationToken = default);
+
     /// <summary>Everything needed to draw the UI from nothing.</summary>
     Task<EngineSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default);
 

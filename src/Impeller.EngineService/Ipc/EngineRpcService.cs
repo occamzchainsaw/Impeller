@@ -51,6 +51,24 @@ public sealed class EngineRpcService(
     private CancellationTokenSource? _tuningCancellation;
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Answers, and records nothing. The engine holds no per-client state on this channel — that is
+    /// what makes a second window a non-event — so the handshake is a truthful answer rather than a
+    /// gate, and the shell is what acts on it. See <see cref="EngineHandshakeCheck"/>.
+    /// </remarks>
+    public Task<EngineHandshake> HelloAsync(
+        ShellHello hello,
+        CancellationToken cancellationToken = default)
+    {
+        var version = EngineVersion();
+
+        return Task.FromResult(
+            EngineHandshakeCheck.TryAccept(hello, version, out var refusal)
+                ? EngineHandshakeCheck.Accept(version)
+                : refusal);
+    }
+
+    /// <inheritdoc />
     public Task<EngineSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(new EngineSnapshot(
             BuildStatus(),
@@ -501,8 +519,12 @@ public sealed class EngineRpcService(
         }
     }
 
+    /// <summary>This build's version, as both the status and the handshake report it.</summary>
+    private static string EngineVersion() =>
+        Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
+
     private EngineStatus BuildStatus() => new(
-        Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0",
+        EngineVersion(),
         workerState.TickCount,
         workerState.LastTickCompleted,
         loop.IsFailsafeEngaged,

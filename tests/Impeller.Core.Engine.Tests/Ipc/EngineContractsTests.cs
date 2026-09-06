@@ -348,7 +348,25 @@ public sealed class EngineContractsTests : IAsyncDisposable
 
         private static readonly CurveId AutoCurve = CurveId.New();
 
+        public const string Version = "0.1.0";
+
         public IEngineEvents? Events { get; set; }
+
+        /// <summary>The last hello this engine was sent, so a test can assert what crossed the wire.</summary>
+        public ShellHello? Greeted { get; private set; }
+
+        /// <inheritdoc />
+        public Task<EngineHandshake> HelloAsync(
+            ShellHello hello,
+            CancellationToken cancellationToken = default)
+        {
+            Greeted = hello;
+
+            return Task.FromResult(
+                EngineHandshakeCheck.TryAccept(hello, Version, out var refusal)
+                    ? EngineHandshakeCheck.Accept(Version)
+                    : refusal);
+        }
 
         /// <summary>A report with one of everything, so the round-trip has something to lose.</summary>
         public DiagnosticReport Report { get; } = new()

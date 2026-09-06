@@ -23,6 +23,16 @@ public enum EngineConnectionState
 
     /// <summary>The engine is not installed on this machine at all.</summary>
     NotInstalled,
+
+    /// <summary>
+    /// The engine answered, and the two halves do not speak the same protocol.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="Disconnected"/> because the next step is completely different:
+    /// waiting fixes a service that is restarting and will never fix this one. Somebody has to
+    /// update the half that is behind.
+    /// </remarks>
+    Incompatible,
 }
 
 /// <summary>
@@ -47,6 +57,16 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan MinimumRetryDelay = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan MaximumRetryDelay = TimeSpan.FromSeconds(15);
+
+    /// <summary>
+    /// What this shell tells the engine it is.
+    /// </summary>
+    /// <remarks>
+    /// This assembly's version rather than the executable's, because every project in the solution
+    /// is stamped from one place and this layer has no executable of its own to ask.
+    /// </remarks>
+    private static readonly string ShellVersion =
+        typeof(EngineConnection).Assembly.GetName().Version?.ToString() ?? "0.0.0";
 
     private readonly CancellationTokenSource _shutdown = new();
 
@@ -76,6 +96,18 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
     /// reused by a different front end.
     /// </remarks>
     public Func<bool>? IsEngineInstalled { get; set; }
+
+    /// <summary>
+    /// Opens the transport to the engine. Null means the named pipe, which is the only answer
+    /// outside a test.
+    /// </summary>
+    /// <remarks>
+    /// A seam rather than a design: this class builds its own <c>NamedPipeClientStream</c>, which
+    /// makes the handshake and the retry backoff — the two things here most worth pinning down —
+    /// impossible to test without an engine running. Supplied the same way <see cref="Dispatcher"/>
+    /// and <see cref="IsEngineInstalled"/> are.
+    /// </remarks>
+    public Func<CancellationToken, Task<Stream>>? Connect { get; set; }
 
     /// <summary>
     /// Where connection attempts are recorded.
@@ -278,30 +310,21 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
     {
         SetState(EngineConnectionState.Connecting, "Looking for the engine service…");
 
-        var stream = new NamedPipeClientStream(
-            ".",
-            ImpellerPipe.Name,
-            PipeDirection.InOut,
-            PipeOptions.Asynchronous);
+        Stream stream;
 
         try
         {
-            using var attempt = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            attempt.CancelAfter(ConnectTimeout);
-
-            await stream.ConnectAsync(attempt.Token).ConfigureAwait(false);
+            stream = await OpenAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is TimeoutException or OperationCanceledException or IOException)
         {
-            await stream.DisposeAsync().ConfigureAwait(false);
             ReportUnreachable();
             return false;
         }
 
         try
         {
-            await ServeAsync(stream, cancellationToken).ConfigureAwait(false);
-            return true;
+            return await ServeAsync(stream, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException or RemoteRpcException)
         {
@@ -316,7 +339,45 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
         }
     }
 
-    private async Task ServeAsync(NamedPipeClientStream stream, CancellationToken cancellationToken)
+    /// <summary>Opens the pipe, or whatever <see cref="Connect"/> was given instead.</summary>
+    private async Task<Stream> OpenAsync(CancellationToken cancellationToken)
+    {
+        if (Connect is { } connect)
+        {
+            return await connect(cancellationToken).ConfigureAwait(false);
+        }
+
+        var stream = new NamedPipeClientStream(
+            ".",
+            ImpellerPipe.Name,
+            PipeDirection.InOut,
+            PipeOptions.Asynchronous);
+
+        try
+        {
+            using var attempt = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            attempt.CancelAfter(ConnectTimeout);
+
+            await stream.ConnectAsync(attempt.Token).ConfigureAwait(false);
+        }
+        catch
+        {
+            await stream.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+
+        return stream;
+    }
+
+    /// <summary>
+    /// Runs one connection from handshake to close.
+    /// </summary>
+    /// <returns>
+    /// True when the connection was served and has since ended; false when it was refused. The
+    /// distinction drives the retry backoff, and getting it wrong means retrying a version mismatch
+    /// once a second for the life of the window.
+    /// </returns>
+    private async Task<bool> ServeAsync(Stream stream, CancellationToken cancellationToken)
     {
         // The same serializer contract the engine and the configuration file use.
         var formatter = new SystemTextJsonFormatter
@@ -332,6 +393,13 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
             rpc.AddLocalRpcTarget<IEngineEvents>(this, null);
             var engine = rpc.Attach<IEngineControl>();
             rpc.StartListening();
+
+            // Before Engine is published, deliberately. A refused connection must never hand the
+            // rest of the app a live proxy it will happily make calls on.
+            if (!await AgreeAsync(engine, cancellationToken).ConfigureAwait(false))
+            {
+                return false;
+            }
 
             Engine = engine;
 
@@ -353,6 +421,7 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
             Dispatcher.Post(() => SnapshotReceived?.Invoke(this, snapshot));
 
             await rpc.Completion.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return true;
         }
         finally
         {
@@ -363,6 +432,55 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
                 _rpc = null;
             }
         }
+    }
+
+    /// <summary>
+    /// Settles whether these two halves of Impeller speak the same protocol.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The engine only answers; the decision is made here. That is not laziness about where to put
+    /// the check — it is the only place it can work. The mismatch that matters most is a shell
+    /// older than the service, and an older shell does not call this at all, so there is nothing
+    /// for the engine to refuse. What it can do is answer honestly, which it does.
+    /// </para>
+    /// <para>
+    /// A missing method is itself an answer, and the most likely one in practice: an engine built
+    /// before this verb existed is, by definition, older than the window talking to it.
+    /// </para>
+    /// </remarks>
+    private async Task<bool> AgreeAsync(IEngineControl engine, CancellationToken cancellationToken)
+    {
+        EngineHandshake handshake;
+
+        try
+        {
+            handshake = await engine
+                .HelloAsync(new ShellHello(ShellVersion, EngineProtocol.CurrentVersion), cancellationToken)
+                .WaitAsync(EngineProtocol.HandshakeTimeout, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (RemoteMethodNotFoundException)
+        {
+            ReportIncompatible(
+                "The engine service is older than this copy of Impeller. Run the installer again to "
+                + "update both halves.");
+            return false;
+        }
+
+        if (handshake.Accepted)
+        {
+            return true;
+        }
+
+        ReportIncompatible(handshake.Message);
+        return false;
+    }
+
+    private void ReportIncompatible(string message)
+    {
+        Log.Incompatible(Logger, message);
+        SetState(EngineConnectionState.Incompatible, message);
     }
 
     /// <summary>
@@ -414,10 +532,19 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
         }
     }
 
+    /// <summary>
+    /// Moves to a state and the sentence that goes with it.
+    /// </summary>
+    /// <remarks>
+    /// The message is assigned first, and the order is load-bearing. Anything watching for a state
+    /// to change reads the message in the same handler, and assigning the state first hands it the
+    /// <em>previous</em> sentence — which is how a version mismatch first announced itself as
+    /// "Looking for the engine service…".
+    /// </remarks>
     private void SetState(EngineConnectionState state, string message) => Dispatcher.Post(() =>
     {
-        State = state;
         StatusMessage = message;
+        State = state;
     });
 
     private static partial class Log
@@ -458,5 +585,10 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
             Level = LogLevel.Debug,
             Message = "The engine service is installed but did not answer.")]
         public static partial void NotRunning(ILogger logger);
+
+        // Error, and deliberately not throttled the way NotRunning is. This does not clear itself
+        // by waiting, and the sentence is the whole point: it names which half to update.
+        [LoggerMessage(EventId = 46, Level = LogLevel.Error, Message = "Refused by the engine. {Reason}")]
+        public static partial void Incompatible(ILogger logger, string reason);
     }
 }

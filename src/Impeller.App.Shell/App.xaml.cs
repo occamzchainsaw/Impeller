@@ -97,7 +97,9 @@ public partial class App : Application, IDisposable
 
         // Singleton for the same reason - it is the strip at the foot of the window, which does not
         // belong to any page and must not be rebuilt when one is navigated away from.
-        services.AddSingleton(sp => new ShellStatusViewModel(sp.GetRequiredService<EngineConnection>()));
+        services.AddSingleton(sp => new ShellStatusViewModel(
+            sp.GetRequiredService<EngineConnection>(),
+            sp.GetRequiredService<NotificationCenter>()));
 
         // Transient: a page navigated away from is discarded along with its view model, so
         // returning to it starts from a clean state rather than one the user last left behind.
