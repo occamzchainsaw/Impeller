@@ -199,6 +199,17 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
         {
             var snapshot = await engine.GetSnapshotAsync(cancellationToken).ConfigureAwait(false);
             Snapshot = snapshot;
+
+            // Re-stated, not just recorded. The counts were previously written once, at connect,
+            // and never again - so a shell that reached the engine before it had finished
+            // enumerating its hardware said "0 sensors, 0 controls" for the rest of the session.
+            // That is not a rare race: with both set to start at log-in they come up together, so
+            // it was the ordinary case on a machine configured the way the docs recommend.
+            if (State == EngineConnectionState.Connected)
+            {
+                SetState(EngineConnectionState.Connected, Describe(snapshot));
+            }
+
             Dispatcher.Post(() => SnapshotReceived?.Invoke(this, snapshot));
         }
         catch (Exception ex)
@@ -413,10 +424,7 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
                 snapshot.Controls.Count,
                 snapshot.ConfigurationName);
 
-            SetState(
-                EngineConnectionState.Connected,
-                $"Connected. {snapshot.Sensors.Count} sensors, {snapshot.Controls.Count} controls, "
-                + $"configuration '{snapshot.ConfigurationName}'.");
+            SetState(EngineConnectionState.Connected, Describe(snapshot));
 
             Dispatcher.Post(() => SnapshotReceived?.Invoke(this, snapshot));
 
@@ -476,6 +484,11 @@ public sealed partial class EngineConnection : ObservableObject, IEngineEvents, 
         ReportIncompatible(handshake.Message);
         return false;
     }
+
+    /// <summary>The connected state, in the sentence a tooltip and a bug report both want.</summary>
+    private static string Describe(EngineSnapshot snapshot) =>
+        $"Connected. {snapshot.Sensors.Count} sensors, {snapshot.Controls.Count} controls, "
+        + $"configuration '{snapshot.ConfigurationName}'.";
 
     private void ReportIncompatible(string message)
     {
