@@ -42,31 +42,44 @@ public static class StartupRegistration
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
-        try
-        {
-            using var key = Registry.CurrentUser.OpenSubKey(RunKey);
+        return Executable() is { Length: > 0 } exe
+            && Value(name) is { } value
+            && value.Contains(exe, StringComparison.OrdinalIgnoreCase);
+    }
 
-            return Executable() is { Length: > 0 } exe
-                && key?.GetValue(name) is string value
-                && value.Contains(exe, StringComparison.OrdinalIgnoreCase);
-        }
-        catch (Exception ex)
-            when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
-        {
-            return false;
-        }
+    /// <summary>
+    /// Whether the registered command line carries a particular switch.
+    /// </summary>
+    /// <param name="name">The value name, which is what Task Manager shows.</param>
+    /// <param name="argument">The switch to look for, as it is written.</param>
+    /// <remarks>
+    /// How a preference that only applies to the log-in launch is stored: as an argument on the
+    /// value that performs that launch. It cannot drift out of step with autostart being on,
+    /// because switching autostart off deletes the value that holds it, and it cannot affect a
+    /// launch the user started by hand, because that launch has a different command line.
+    /// </remarks>
+    public static bool HasArgument(string name, string argument)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentException.ThrowIfNullOrWhiteSpace(argument);
+
+        return IsEnabled(name)
+            && Value(name) is { } value
+            && Arguments(value).Any(present =>
+                string.Equals(present, argument, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>Turns autostart on, or off.</summary>
     /// <param name="name">The value name, which is what Task Manager shows.</param>
     /// <param name="enabled">Whether it should start with Windows.</param>
+    /// <param name="arguments">What to launch it with, or null for nothing.</param>
     /// <returns>Whether the change was made.</returns>
     /// <remarks>
     /// Never throws. A registry hive that will not open is a policy-managed machine or a corrupted
     /// profile, and neither is a reason for a fan controller to fail to start — the caller shows
     /// the toggle as it actually is and moves on.
     /// </remarks>
-    public static bool Set(string name, bool enabled)
+    public static bool Set(string name, bool enabled, string? arguments = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
@@ -92,7 +105,9 @@ public static class StartupRegistration
 
             // Quoted, because Program Files has a space in it and an unquoted path there is a
             // well-known way to end up launching something else entirely.
-            key.SetValue(name, $"\"{exe}\"");
+            var tail = string.IsNullOrWhiteSpace(arguments) ? string.Empty : $" {arguments.Trim()}";
+
+            key.SetValue(name, $"\"{exe}\"{tail}");
             return true;
         }
         catch (Exception ex)
@@ -103,4 +118,37 @@ public static class StartupRegistration
     }
 
     private static string Executable() => Environment.ProcessPath ?? string.Empty;
+
+    /// <summary>The raw Run value, or null when there is not one to read.</summary>
+    private static string? Value(string name)
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(RunKey);
+
+            return key?.GetValue(name) as string;
+        }
+        catch (Exception ex)
+            when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Everything after the executable.
+    /// </summary>
+    /// <remarks>
+    /// Only reads arguments off a quoted path, which is the only shape <see cref="Set"/> writes. A
+    /// value someone has hand-edited into the unquoted form reads as having no arguments, which is
+    /// the conservative answer: guessing where an unquoted path with spaces in it ends is how the
+    /// quoting rule earned its place to begin with.
+    /// </remarks>
+    private static string[] Arguments(string value)
+    {
+        var end = value.StartsWith('"') ? value.IndexOf('"', 1) : -1;
+        var tail = end > 0 ? value[(end + 1)..] : string.Empty;
+
+        return tail.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
 }

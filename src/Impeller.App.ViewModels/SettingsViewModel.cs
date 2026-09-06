@@ -75,6 +75,19 @@ public sealed partial class SettingsViewModel : EnginePageViewModel
     public partial bool StartsWithWindows { get; set; }
 
     /// <summary>
+    /// Whether that log-in start leaves the window in the notification area.
+    /// </summary>
+    /// <remarks>
+    /// Only meaningful alongside <see cref="StartsWithWindows"/>, because it is stored as an
+    /// argument on the same registry value — switch autostart off and there is nothing left to
+    /// carry it. The page greys it out to say so, rather than offering a switch that quietly
+    /// remembers nothing. Launching Impeller by hand is unaffected either way: that is somebody
+    /// asking for the window, and they should get it.
+    /// </remarks>
+    [ObservableProperty]
+    public partial bool StartsMinimised { get; set; }
+
+    /// <summary>
     /// Asks the user for a FanControl configuration file.
     /// </summary>
     /// <remarks>
@@ -96,8 +109,16 @@ public sealed partial class SettingsViewModel : EnginePageViewModel
     /// </remarks>
     public Func<bool>? ReadAutostart { get; set; }
 
+    /// <summary>Reads whether that registration asks for the tray. Supplied by the shell.</summary>
+    public Func<bool>? ReadStartMinimised { get; set; }
+
     /// <summary>Registers or unregisters it. Supplied by the shell.</summary>
-    public Func<bool, bool>? WriteAutostart { get; set; }
+    /// <remarks>
+    /// Both facts at once, because both live in one registry value. A separate "write minimised"
+    /// would have to read the value back to find out what the rest of it should say, and two halves
+    /// of one string written from two places is exactly where a half-set state comes from.
+    /// </remarks>
+    public Func<bool, bool, bool>? WriteAutostart { get; set; }
 
     /// <inheritdoc />
     /// <remarks>
@@ -112,36 +133,57 @@ public sealed partial class SettingsViewModel : EnginePageViewModel
         // the current state must not count as changing it.
         _readingAutostart = true;
         StartsWithWindows = ReadAutostart?.Invoke() ?? false;
+        StartsMinimised = ReadStartMinimised?.Invoke() ?? false;
         _readingAutostart = false;
     }
 
+    /// <summary>Registers or unregisters the shell.</summary>
+    partial void OnStartsWithWindowsChanged(bool value) =>
+        WriteRegistration(value, StartsMinimised, () => StartsWithWindows = !value);
+
     /// <summary>
-    /// Registers or unregisters the shell, and tells the truth if it could not.
+    /// Rewrites the registration to launch hidden, or not.
+    /// </summary>
+    /// <remarks>
+    /// Silent while autostart is off, because there is no value to write the switch onto. The
+    /// answer is kept in the property so that turning autostart on afterwards carries it, and the
+    /// page has the switch greyed out meanwhile so nobody sets it expecting otherwise.
+    /// </remarks>
+    partial void OnStartsMinimisedChanged(bool value)
+    {
+        if (StartsWithWindows)
+        {
+            WriteRegistration(true, value, () => StartsMinimised = !value);
+        }
+    }
+
+    /// <summary>
+    /// Writes the log-in registration, and tells the truth if it could not.
     /// </summary>
     /// <remarks>
     /// A toggle that silently springs back is worse than one that is missing, so a refusal - a
     /// policy-managed registry, most likely - is announced and the switch is put back where it was
     /// rather than left showing a state that is not real.
     /// </remarks>
-    partial void OnStartsWithWindowsChanged(bool value)
+    private void WriteRegistration(bool enabled, bool minimised, Action revert)
     {
         if (_readingAutostart || WriteAutostart is not { } write)
         {
             return;
         }
 
-        if (write(value))
+        if (write(enabled, minimised))
         {
             return;
         }
 
         Notify.Error(
             "Windows would not save that.",
-            "Impeller could not change whether it starts with Windows. You can set it by hand in "
+            "Impeller could not change how it starts with Windows. You can set it by hand in "
                 + "Task Manager, on the Startup apps tab.");
 
         _readingAutostart = true;
-        StartsWithWindows = !value;
+        revert();
         _readingAutostart = false;
     }
 

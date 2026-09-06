@@ -207,10 +207,23 @@
                         OffContent="No"
                         OnContent="Yes" />
 
+                    <!--
+                        Greyed out until there is a log-in launch to describe. The preference is
+                        stored as an argument on that launch, so switching the one above off takes
+                        it with it - and a switch that appears to remember something it cannot is
+                        worse than one that is plainly unavailable.
+                    -->
+                    <ToggleSwitch
+                        Header="And leave it in the notification area"
+                        IsEnabled="{x:Bind ViewModel.StartsWithWindows, Mode=OneWay}"
+                        IsOn="{x:Bind ViewModel.StartsMinimised, Mode=TwoWay}"
+                        OffContent="Open the window"
+                        OnContent="Tray only" />
+
                     <TextBlock
                         FontSize="12"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="Listed in Task Manager under Startup apps, where you can also switch it off."
+                        Text="Listed in Task Manager under Startup apps, where you can also switch it off. Starting Impeller yourself always opens the window, however these are set."
                         TextWrapping="Wrap" />
                 </StackPanel>
             </Expander>

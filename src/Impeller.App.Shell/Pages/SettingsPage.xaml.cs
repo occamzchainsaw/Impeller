@@ -1,4 +1,5 @@
 using Impeller.App.ViewModels;
+using Impeller.App.ViewModels.Shell;
 using Impeller.Platform.Windows;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -27,7 +28,16 @@ public sealed partial class SettingsPage : Page
         ViewModel.PickLegacyFile = PickLegacyFileAsync;
         ViewModel.CopyToClipboard = Copy;
         ViewModel.ReadAutostart = () => StartupRegistration.IsEnabled(AutostartName);
-        ViewModel.WriteAutostart = enabled => StartupRegistration.Set(AutostartName, enabled);
+        ViewModel.ReadStartMinimised = () =>
+            StartupRegistration.HasArgument(AutostartName, ShellStartup.MinimisedSwitch);
+
+        // The switch goes on the Run value's command line rather than into a file of the shell's
+        // own, so it applies to the log-in launch and to nothing else. Double-clicking Impeller is
+        // somebody asking for the window; they should get it.
+        ViewModel.WriteAutostart = (enabled, minimised) => StartupRegistration.Set(
+            AutostartName,
+            enabled,
+            minimised ? ShellStartup.MinimisedSwitch : null);
 
         Loaded += async (_, _) => await ViewModel.LoadAsync().ConfigureAwait(true);
         Unloaded += (_, _) => ViewModel.Dispose();

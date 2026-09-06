@@ -1,6 +1,7 @@
 using Impeller.App.ViewModels;
 using Impeller.App.ViewModels.Engine;
 using Impeller.App.ViewModels.Notifications;
+using Impeller.App.ViewModels.Shell;
 using Impeller.Platform.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -40,6 +41,12 @@ public partial class App : Application, IDisposable
 
         [LoggerMessage(EventId = 51, Level = LogLevel.Critical, Message = "Unhandled exception in the shell.")]
         public static partial void Crashed(ILogger logger, Exception exception);
+
+        [LoggerMessage(
+            EventId = 52,
+            Level = LogLevel.Information,
+            Message = "Started in the notification area. The window stays hidden until it is asked for.")]
+        public static partial void StartedHidden(ILogger logger);
     }
 
     /// <summary>The application's service provider.</summary>
@@ -151,7 +158,19 @@ public partial class App : Application, IDisposable
             // Reached only on a real exit: the tray handles an ordinary close by hiding the window
             // and cancelling it, so this runs once, when the user has actually chosen to quit.
             _window.Closed += (_, _) => Dispose();
-            _window.Activate();
+
+            if (ShellStartup.StartsMinimised(Environment.GetCommandLineArgs()))
+            {
+                // Hidden, not merely left unactivated. Restoring a window that was maximised last
+                // time calls Maximize on its presenter, and that shows it — so declining to
+                // activate is not on its own enough to keep it off the screen.
+                _window.AppWindow.Hide();
+                Log.StartedHidden(logger);
+            }
+            else
+            {
+                _window.Activate();
+            }
         }
         catch (Exception ex)
         {

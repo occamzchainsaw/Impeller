@@ -140,6 +140,22 @@ a scheduled task nobody thinks to look for.
 Move the folder and the toggle will read as off, because the value points somewhere else. Switching
 it on again rewrites it.
 
+The second toggle, **And leave it in the notification area**, decides what that log-in launch does
+when it gets there: open the window, or stay in the tray. Most people want the tray — the reason to
+start Impeller with Windows is usually to have the icon there, not to be handed a window on top of
+whatever you opened next.
+
+It is stored as a `--minimised` argument on that same `Run` value, so the whole setting reads:
+
+```
+"C:\Path\To\Impeller.exe" --minimised
+```
+
+Two things follow from storing it there rather than in a settings file. Turning autostart off takes
+it with it, which is why the second toggle greys out. And it applies to the log-in launch only —
+double-clicking `Impeller.exe` yourself always opens the window, because that is somebody asking
+for it.
+
 **This setting is only about the window.** Your fans do not need it. The engine is a service; it
 starts at boot, before any user logs in, and keeps going while you are logged out.
 
