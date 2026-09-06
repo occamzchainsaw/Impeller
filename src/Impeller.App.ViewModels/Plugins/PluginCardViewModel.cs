@@ -14,7 +14,7 @@ public sealed partial class GrantedFanViewModel(SensorId id, string name, bool g
     /// <summary>Which fan.</summary>
     public SensorId Id { get; } = id;
 
-    /// <summary>What the hardware calls it.</summary>
+    /// <summary>What to call it: the user's name for it, or the provider's when they gave none.</summary>
     public string Name { get; } = name;
 
     /// <summary>Whether this plugin currently has it.</summary>

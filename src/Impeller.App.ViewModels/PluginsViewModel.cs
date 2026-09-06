@@ -36,6 +36,15 @@ public sealed partial class PluginsViewModel(EngineConnection connection, Notifi
     /// <summary>The plugins, newest first — the one that just turned up is the one being asked about.</summary>
     public ObservableCollection<PluginCardViewModel> Plugins { get; } = [];
 
+    /// <summary>
+    /// The refresh currently running, or the last one that did.
+    /// </summary>
+    /// <remarks>
+    /// Everything here runs on the UI thread and only yields at an await, so a plain field is
+    /// enough to serialise them — no lock, and no chance of two rebuilds interleaving.
+    /// </remarks>
+    private Task _refresh = Task.CompletedTask;
+
     /// <summary>Whether the engine has been asked and answered with nothing.</summary>
     [ObservableProperty]
     public partial bool IsEmpty { get; private set; }
@@ -64,9 +73,48 @@ public sealed partial class PluginsViewModel(EngineConnection connection, Notifi
     /// </remarks>
     protected override void OnSnapshot(EngineSnapshot snapshot) => _ = RefreshAsync();
 
-    /// <summary>Asks the engine what it knows and rebuilds the list.</summary>
+    /// <summary>
+    /// Asks the engine what it knows and rebuilds the list.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// One at a time, and that is a fix rather than caution. Opening the page calls this while the
+    /// first snapshot is arriving, which calls it again; both then wait on
+    /// <c>ListPluginsAsync</c>, and both resume past the guard below to clear the list and add to
+    /// it — leaving every plugin on screen twice.
+    /// </para>
+    /// <para>
+    /// Each call queues behind the one before it rather than being dropped, so a trigger that
+    /// arrives mid-refresh still gets a rebuild against what it saw — and so awaiting this still
+    /// means the list is up to date, which the page's own <c>LoadAsync</c> relies on.
+    /// </para>
+    /// </remarks>
     [RelayCommand]
-    private async Task RefreshAsync()
+    private Task RefreshAsync()
+    {
+        // Chained rather than skipped, so that awaiting this still means the list is rebuilt. A
+        // caller told "one is already running" would return before the answer it asked for existed,
+        // and the page's own LoadAsync is one of those callers.
+        _refresh = Chain(_refresh);
+        return _refresh;
+
+        async Task Chain(Task previous)
+        {
+            try
+            {
+                await previous.ConfigureAwait(true);
+            }
+            catch (Exception)
+            {
+                // A previous refresh that failed has already reported itself. It must not stop the
+                // next one, or one bad answer would wedge the page for the session.
+            }
+
+            await RefreshOnceAsync().ConfigureAwait(true);
+        }
+    }
+
+    private async Task RefreshOnceAsync()
     {
         if (Connection.Engine is not { } engine)
         {
@@ -119,7 +167,13 @@ public sealed partial class PluginsViewModel(EngineConnection connection, Notifi
         (Connection.Snapshot?.Controls ?? [])
             .Select(control => new GrantedFanViewModel(
                 control.Id,
-                control.Name,
+
+                // The user's name for it, not the provider's. Deciding which program may drive
+                // "Front Intake" is a question about the fan they named, and answering it with
+                // "Fan #3" makes them translate their own labels back into the hardware's. The
+                // engine already resolves this on the descriptor, and every other surface - the
+                // dashboard, the sensors tree, what a plugin is told - uses the resolved one.
+                control.DisplayName,
                 summary.Controls.Contains(control.Id),
 
                 // The engine's own answer, carried on the descriptor. Deriving it here from a
