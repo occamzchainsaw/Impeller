@@ -49,7 +49,7 @@
     Central versioning. Bump here; every assembly follows.
   -->
   <PropertyGroup>
-    <VersionPrefix>0.1.3</VersionPrefix>
+    <VersionPrefix>0.1.4</VersionPrefix>
     <VersionSuffix Condition="'$(Configuration)' == 'Debug'">dev</VersionSuffix>
   </PropertyGroup>
 
