@@ -99,8 +99,8 @@ public sealed class AutoCurve : FanCurveBase
         SensorId source,
         float idleTemperature = 35f,
         float loadTemperature = 70f,
-        Duty minimumDuty = default,
-        Duty maximumDuty = default,
+        Duty? minimumDuty = null,
+        Duty? maximumDuty = null,
         float step = 2f,
         float deadband = 3f,
         TimeSpan responseTime = default)
@@ -111,8 +111,15 @@ public sealed class AutoCurve : FanCurveBase
 
         IdleTemperature = idleTemperature;
         LoadTemperature = loadTemperature;
-        MinimumDuty = minimumDuty == default ? DefaultMinimumDuty : minimumDuty;
-        MaximumDuty = maximumDuty == default ? DefaultMaximumDuty : maximumDuty;
+
+        // Nullable, not a default-valued struct. default(Duty) is 0%, which is a perfectly
+        // ordinary floor to ask for — a GPU whose fan should idle off, a case fan allowed to
+        // stop — so using it as the "not specified" sentinel silently replaced every one of those
+        // with 50%. The curve then held the fan at half speed while the saved configuration, the
+        // UI and the engine's own readback all agreed the floor was zero, and nothing anywhere
+        // contradicted itself.
+        MinimumDuty = minimumDuty ?? DefaultMinimumDuty;
+        MaximumDuty = maximumDuty ?? DefaultMaximumDuty;
         Step = step;
         Deadband = deadband;
         _responseTime = responseTime <= TimeSpan.Zero ? TimeSpan.FromSeconds(2) : responseTime;
