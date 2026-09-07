@@ -1,4 +1,5 @@
 using Impeller.Core.Abstractions;
+using Impeller.Core.Abstractions.Configuration;
 using Impeller.Core.Engine.Curves;
 
 namespace Impeller.Core.Engine.Tests.Curves;
@@ -241,5 +242,56 @@ public class AutoCurveTests
         var duties = Run(curve, 75f, 75f);
 
         Assert.Equal(100f, duties[^1]!.Value.Percent, precision: 3);
+    }
+
+    /// <summary>
+    /// Parity with FanControl, whose <c>SerializableAutoFanCurve</c> ships
+    /// <c>MinFanSpeed = 50</c>, <c>MaxFanSpeed = 80</c>, <c>LoadTemperature = 70</c>,
+    /// <c>IdleTemperature = 35</c>, <c>Step = 2</c>, <c>Deadband = 3</c> and a response of 2.
+    /// </summary>
+    /// <remarks>
+    /// The ceiling is the one that bites. A curve that seeks a temperature climbs until the
+    /// temperature stops rising, so with no ceiling below full speed an ordinary load ends at
+    /// full speed - which is what "it works in FanControl and screams in Impeller" turned out
+    /// to be.
+    /// </remarks>
+    [Fact]
+    public void An_auto_curve_starts_from_the_same_numbers_FanControl_ships()
+    {
+        var definition = new AutoCurveDefinition();
+
+        Assert.Equal(35f, definition.IdleTemperature);
+        Assert.Equal(70f, definition.LoadTemperature);
+        Assert.Equal(50f, definition.MinimumDuty.Percent);
+        Assert.Equal(80f, definition.MaximumDuty.Percent);
+        Assert.Equal(2f, definition.Step);
+        Assert.Equal(3f, definition.Deadband);
+        Assert.Equal(TimeSpan.FromSeconds(2), definition.ResponseTime);
+    }
+
+    /// <summary>The curve itself agrees with the definition when it is handed no range.</summary>
+    [Fact]
+    public void A_curve_built_without_a_range_uses_the_same_range_as_the_definition()
+    {
+        var curve = new AutoCurve(CurveId.New(), "auto", Temperature);
+
+        Assert.Equal(50f, curve.MinimumDuty.Percent);
+        Assert.Equal(80f, curve.MaximumDuty.Percent);
+    }
+
+    /// <summary>
+    /// The ceiling has to hold under exactly the condition that produced the complaint: a
+    /// temperature parked above the target for a long time, which is where the integrator
+    /// otherwise walks the duty to full speed.
+    /// </summary>
+    [Fact]
+    public void A_temperature_held_above_the_target_never_drives_past_the_ceiling()
+    {
+        var curve = new AutoCurve(CurveId.New(), "auto", Temperature);
+
+        var duties = Run(curve, Enumerable.Repeat(90f, 120).ToArray());
+
+        Assert.All(duties, duty => Assert.True(duty!.Value.Percent <= 80f));
+        Assert.Equal(80f, duties[^1]!.Value.Percent, precision: 3);
     }
 }

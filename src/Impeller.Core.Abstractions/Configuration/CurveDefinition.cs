@@ -145,10 +145,17 @@ public sealed record AutoCurveDefinition : CurveDefinition
     public float LoadTemperature { get; init; } = 70f;
 
     /// <summary>Floor of the duty range the curve works within.</summary>
-    public Duty MinimumDuty { get; init; }
+    /// <remarks>
+    /// Defaults deliberately match FanControl's auto curve rather than the full range. A
+    /// controller that seeks a temperature needs a floor it can settle on and a ceiling it will
+    /// not scream past, and 50-80 is the pair FanControl ships. Starting at 0-100 turns every
+    /// ordinary load into full speed, because nothing stops the integrator climbing.
+    /// </remarks>
+    public Duty MinimumDuty { get; init; } = new(50f);
 
     /// <summary>Ceiling of the duty range the curve works within.</summary>
-    public Duty MaximumDuty { get; init; } = Duty.Full;
+    /// <remarks>See <see cref="MinimumDuty"/> for why this is not <see cref="Duty.Full"/>.</remarks>
+    public Duty MaximumDuty { get; init; } = new(80f);
 
     /// <summary>How far the duty moves per upward adjustment, in percentage points.</summary>
     public float Step { get; init; } = 2f;

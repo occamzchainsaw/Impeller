@@ -49,6 +49,12 @@ public sealed class AutoCurve : FanCurveBase
     /// </summary>
     private const float LoadEntryFraction = 0.75f;
 
+    /// <summary>Floor a curve works within when none was given. FanControl's own default.</summary>
+    private static readonly Duty DefaultMinimumDuty = new(50f);
+
+    /// <summary>Ceiling a curve works within when none was given. FanControl's own default.</summary>
+    private static readonly Duty DefaultMaximumDuty = new(80f);
+
     private readonly SensorId[] _dependencies;
 
     private TimeSpan _responseTime;
@@ -68,8 +74,13 @@ public sealed class AutoCurve : FanCurveBase
     /// <param name="source">The temperature this curve is trying to hold.</param>
     /// <param name="idleTemperature">At or below this, the curve commands <paramref name="minimumDuty"/>.</param>
     /// <param name="loadTemperature">The temperature the curve seeks to hold.</param>
-    /// <param name="minimumDuty">Floor of the range the curve works within.</param>
-    /// <param name="maximumDuty">Ceiling of the range the curve works within.</param>
+    /// <param name="minimumDuty">
+    /// Floor of the range the curve works within. Defaults to 50%, matching FanControl.
+    /// </param>
+    /// <param name="maximumDuty">
+    /// Ceiling of the range the curve works within. Defaults to 80%, matching FanControl: a
+    /// seeking controller with no ceiling below full speed turns ordinary load into full speed.
+    /// </param>
     /// <param name="step">
     /// How much the duty moves per adjustment while under load, in percentage points. Down steps
     /// are half this.
@@ -100,8 +111,8 @@ public sealed class AutoCurve : FanCurveBase
 
         IdleTemperature = idleTemperature;
         LoadTemperature = loadTemperature;
-        MinimumDuty = minimumDuty;
-        MaximumDuty = maximumDuty == default ? Duty.Full : maximumDuty;
+        MinimumDuty = minimumDuty == default ? DefaultMinimumDuty : minimumDuty;
+        MaximumDuty = maximumDuty == default ? DefaultMaximumDuty : maximumDuty;
         Step = step;
         Deadband = deadband;
         _responseTime = responseTime <= TimeSpan.Zero ? TimeSpan.FromSeconds(2) : responseTime;
