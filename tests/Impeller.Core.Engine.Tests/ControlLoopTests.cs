@@ -494,4 +494,59 @@ public class ControlLoopTests
         public override Duty? Evaluate(ICurveEvaluationContext context) =>
             throw new InvalidOperationException("curve fault");
     }
+
+    /// <summary>
+    /// While a measuring run holds a control, the tick loop must leave it alone.
+    /// </summary>
+    /// <remarks>
+    /// A calibration or pairing run writes duties straight to the hardware, bypassing ramp limits
+    /// and the start/stop gate, because a measurement is of what a fan does at a duty rather than
+    /// on the way to one. It never registers a requested duty, so the loop used to fall back to
+    /// the curve and write over it — once whenever the curve moved, and again on every
+    /// restatement. The fan never sat still at the duty being measured, so pairing looked for a
+    /// speed that fell by a fifth and found nothing.
+    /// </remarks>
+    [Fact]
+    public void A_control_held_by_a_measuring_run_is_left_alone()
+    {
+        var h = Harness.Build();
+
+        h.Loop.Tick(Tick);
+        var before = h.Fan.Writes.Count;
+
+        Assert.True(h.Loop.TryAcquire(
+            h.Fan.Id,
+            ControlOwnerKind.ManualOverride,
+            Impeller.Core.Engine.Tuning.TuningCoordinator.Claimant).Succeeded);
+
+        // Twenty ticks: several times round the restatement schedule, which is the write that
+        // reached a measured fan even when the curve was not moving at all.
+        for (var i = 0; i < 20; i++)
+        {
+            h.Loop.Tick(Tick);
+        }
+
+        Assert.Equal(before, h.Fan.Writes.Count);
+    }
+
+    /// <summary>And it goes back to being driven the moment the run hands it back.</summary>
+    [Fact]
+    public void A_control_is_driven_again_once_the_measuring_run_releases_it()
+    {
+        var h = Harness.Build();
+
+        h.Loop.TryAcquire(h.Fan.Id, ControlOwnerKind.ManualOverride, Impeller.Core.Engine.Tuning.TuningCoordinator.Claimant);
+        h.Loop.Tick(Tick);
+
+        var during = h.Fan.Writes.Count;
+
+        h.Ownership.Release(h.Fan.Id, Impeller.Core.Engine.Tuning.TuningCoordinator.Claimant);
+
+        for (var i = 0; i < 5; i++)
+        {
+            h.Loop.Tick(Tick);
+        }
+
+        Assert.True(h.Fan.Writes.Count > during);
+    }
 }

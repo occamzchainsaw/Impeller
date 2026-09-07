@@ -600,6 +600,23 @@ public sealed class ControlLoop
                 continue;
             }
 
+            // A measuring run drives the hardware itself, and while one holds a control the tick
+            // loop must not touch it at all.
+            //
+            // The run claims each control it needs and then writes duties straight to the device,
+            // deliberately bypassing ramp limits and the start/stop gate: a calibration measures
+            // what a fan does at a duty, not what it does while being eased toward one. But it
+            // never registers a requested duty, so ResolveTarget saw a claimant with no opinion
+            // and fell back to the curve - correct for a plugin that has taken a fan and not yet
+            // said anything, and exactly wrong here. The loop then wrote the curve's answer over
+            // the run's, once whenever the curve moved and again on every restatement, and the fan
+            // never sat still at the duty being measured. Pairing looked for a speed that fell by
+            // a fifth and found nothing, or found something else.
+            if (IsBeingMeasured(binding.ControlId))
+            {
+                continue;
+            }
+
             // Switched off means Impeller's own curves leave this fan alone. It has never meant
             // that nobody may drive it, and reading it that way here - ahead of ownership, so a
             // claimant's duties were accepted and then dropped on the floor - is what forced the
@@ -762,9 +779,12 @@ public sealed class ControlLoop
 
         foreach (var controlId in _bindings.Keys)
         {
-            // A control the engine has not commanded has nothing to restate, and one that is
-            // resting has deliberately been handed back to firmware.
-            if (!_commandedDuties.ContainsKey(controlId) || _resting.Contains(controlId))
+            // A control the engine has not commanded has nothing to restate, one that is resting
+            // has deliberately been handed back to firmware, and one being measured belongs to
+            // the run - restating a duty at it is the same interference as writing a new one.
+            if (!_commandedDuties.ContainsKey(controlId)
+                || _resting.Contains(controlId)
+                || IsBeingMeasured(controlId))
             {
                 _sinceWrite.Remove(controlId);
                 continue;
@@ -866,6 +886,23 @@ public sealed class ControlLoop
     /// Works out what duty a control should be heading toward, based on who owns it.
     /// Returns null when the owner has nothing to say, in which case the control holds.
     /// </summary>
+    /// <summary>
+    /// Whether a calibration or pairing run currently holds this control.
+    /// </summary>
+    /// <remarks>
+    /// Identified by claimant rather than by a flag on the loop, because a run is a claim like any
+    /// other and there is exactly one claimant name for it. Nothing else about ownership needs a
+    /// special case: the run takes the control the ordinary way, and this is only about which of
+    /// two writers gets to talk to the hardware while it holds it.
+    /// </remarks>
+    private bool IsBeingMeasured(SensorId controlId)
+    {
+        var owner = _ownership.GetOwner(controlId);
+
+        return owner.Kind == ControlOwnerKind.ManualOverride
+            && string.Equals(owner.ClaimantId, Tuning.TuningCoordinator.Claimant, StringComparison.Ordinal);
+    }
+
     private Duty? ResolveTarget(ControlBinding binding, Dictionary<CurveId, Duty?> curveOutputs)
     {
         var owner = _ownership.GetOwner(binding.ControlId);
