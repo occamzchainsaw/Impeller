@@ -121,9 +121,17 @@ public sealed class ControlBinding(SensorId controlId)
                 return 0f;
             }
 
-            return StopDuty.IsOff || StopDuty == StartDuty
+            var threshold = StopDuty.IsOff || StopDuty == StartDuty
                 ? StartDuty.Percent - 1f
                 : StopDuty.Percent;
+
+            // A floor outranks the threshold. Calibration measures the lowest duty at which a fan
+            // still turns and writes it to MinimumDuty, and the stop duty it measures alongside is
+            // frequently the same number - at which point the gate would switch off a fan sitting
+            // at the floor it was just told to hold, and never restart it, because the curve can
+            // no longer ask for anything lower. A fan with a measured floor runs at that floor
+            // instead of stopping; one with no floor keeps the old behaviour exactly.
+            return MinimumDuty.IsOff ? threshold : MathF.Min(threshold, MinimumDuty.Percent - 1f);
         }
     }
 

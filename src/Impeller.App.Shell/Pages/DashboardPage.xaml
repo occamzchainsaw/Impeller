@@ -159,6 +159,75 @@
                                             IsEnabled="{x:Bind IsPresent}"
                                             ToolTipService.ToolTip="Spin this fan up for five seconds" />
 
+                                        <!--
+                                            A flyout rather than more buttons on the card face.
+                                            UniformGridLayout fixes every card to the height of the
+                                            first, so the fan's own limits - which govern it on
+                                            every tick and had no UI at all - cannot be shown as
+                                            rows without cutting off every card. They open over the
+                                            card instead, along with the two measuring runs that
+                                            produce them.
+                                        -->
+                                        <Button
+                                            Padding="10,0,10,0"
+                                            VerticalAlignment="Stretch"
+                                            AutomationProperties.Name="Limits and calibration for this fan"
+                                            IsEnabled="{x:Bind IsPresent}"
+                                            ToolTipService.ToolTip="This fan's own duty limits, and measuring it">
+                                            <FontIcon FontSize="14" Glyph="&#xE9E9;" />
+                                            <Button.Flyout>
+                                                <Flyout>
+                                                    <StackPanel MinWidth="300" Spacing="12">
+                                                        <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="Limits" />
+
+                                                        <TextBlock
+                                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                            Text="{x:Bind LimitsDetail, Mode=OneWay}"
+                                                            TextWrapping="Wrap" />
+
+                                                        <Grid ColumnSpacing="10">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="*" />
+                                                            </Grid.ColumnDefinitions>
+
+                                                            <NumberBox
+                                                                Header="Never below"
+                                                                Maximum="100"
+                                                                Minimum="0"
+                                                                SpinButtonPlacementMode="Compact"
+                                                                Value="{x:Bind FloorPercent, Mode=TwoWay}" />
+
+                                                            <NumberBox
+                                                                Grid.Column="1"
+                                                                Header="Never above"
+                                                                Maximum="100"
+                                                                Minimum="0"
+                                                                SpinButtonPlacementMode="Compact"
+                                                                Value="{x:Bind CeilingPercent, Mode=TwoWay}" />
+                                                        </Grid>
+
+                                                        <TextBlock
+                                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                            Text="{x:Bind MeasuredText, Mode=OneWay}"
+                                                            TextWrapping="Wrap" />
+
+                                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                                            <Button
+                                                                Command="{x:Bind CalibrateCommand}"
+                                                                Content="Calibrate this fan"
+                                                                ToolTipService.ToolTip="Measures this fan alone: a few minutes of audible ramping, not the whole machine" />
+
+                                                            <Button
+                                                                Command="{x:Bind PairCommand}"
+                                                                Content="Find its tacho"
+                                                                ToolTipService.ToolTip="Works out which speed reading belongs to this fan" />
+                                                        </StackPanel>
+                                                    </StackPanel>
+                                                </Flyout>
+                                            </Button.Flyout>
+                                        </Button>
+
                                         <!--  Named, because a button whose only content is a glyph announces nothing.  -->
                                         <Button
                                             Padding="10,0,10,0"
@@ -175,6 +244,7 @@
                                 <!--  The two numbers, and who is deciding them.  -->
                                 <Grid ColumnSpacing="10">
                                     <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
@@ -208,8 +278,21 @@
                                         Text="{x:Bind RequestedText, Mode=OneWay}"
                                         ToolTipService.ToolTip="{x:Bind RequestedDetail, Mode=OneWay}" />
 
+                                    <!--
+                                        The fan's own range, on the card rather than behind a
+                                        hover. Empty for a fan with no limits set, so it costs
+                                        nothing on the cards that do not need it.
+                                    -->
                                     <TextBlock
                                         Grid.Column="3"
+                                        Margin="0,0,0,4"
+                                        VerticalAlignment="Bottom"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Text="{x:Bind LimitsText, Mode=OneWay}"
+                                        ToolTipService.ToolTip="{x:Bind LimitsDetail, Mode=OneWay}" />
+
+                                    <TextBlock
+                                        Grid.Column="4"
                                         Margin="0,0,0,4"
                                         VerticalAlignment="Bottom"
                                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"

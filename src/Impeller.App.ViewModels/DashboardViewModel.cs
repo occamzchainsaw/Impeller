@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.Input;
 using Impeller.App.ViewModels.Controls;
 using Impeller.App.ViewModels.Engine;
 using Impeller.App.ViewModels.Notifications;
+using Impeller.App.ViewModels.Tuning;
 using Impeller.Core.Abstractions;
 using Impeller.Core.Abstractions.Configuration;
 using Impeller.Ipc.Contracts;
@@ -54,15 +55,26 @@ public readonly record struct AvailableFan(SensorId Id, string Name, string Hard
 /// this window is closed, and what would let a different front end replace it.
 /// </para>
 /// </remarks>
-public sealed partial class DashboardViewModel(EngineConnection connection, NotificationCenter notifications)
-    : EnginePageViewModel(connection, notifications)
+public sealed partial class DashboardViewModel : EnginePageViewModel
 {
     private readonly Dictionary<SensorId, ControlCardViewModel> _cards = [];
     private readonly Dictionary<SensorId, SensorId> _tachometers = [];
     private readonly Dictionary<string, string> _pluginNames = new(StringComparer.Ordinal);
 
+    public DashboardViewModel(EngineConnection connection, NotificationCenter notifications)
+        : base(connection, notifications) => Tuning = new TuningViewModel(connection);
+
     /// <inheritdoc />
     public override string Title => "Dashboard";
+
+    /// <summary>
+    /// The measuring runs, so a single fan can be measured from its own card.
+    /// </summary>
+    /// <remarks>
+    /// Settings has its own instance for the all-fans runs. Both talk to the same engine, which
+    /// refuses a second run while one is going, so two view models cannot start overlapping runs.
+    /// </remarks>
+    public TuningViewModel Tuning { get; }
 
     /// <summary>How many sensors the engine can see.</summary>
     [ObservableProperty]
@@ -263,7 +275,9 @@ public sealed partial class DashboardViewModel(EngineConnection connection, Noti
                 Notify,
                 SaveAsync,
                 RemoveFanAsync,
-                NameClaimant);
+                NameClaimant,
+                CalibrateOneAsync,
+                PairOneAsync);
 
             _cards[binding.ControlId] = card;
             wanted.Add(card);
@@ -321,6 +335,28 @@ public sealed partial class DashboardViewModel(EngineConnection connection, Noti
 
         await ApplyAsync(snapshot.Configuration with { Controls = [.. controls] }).ConfigureAwait(true);
     }
+
+    /// <summary>
+    /// Measures one fan, rather than every fan on the machine.
+    /// </summary>
+    /// <remarks>
+    /// A full calibration run walks every header through its whole range and takes a quarter of an
+    /// hour of audible ramping, which is not a reasonable price for adding one fan or re-measuring
+    /// one that was changed. The engine has always taken a list; only the window insisted on
+    /// passing every control in it.
+    /// </remarks>
+    private Task CalibrateOneAsync(SensorId controlId) => Tuning.CalibrateAsync([controlId]);
+
+    /// <summary>
+    /// Works out which tacho belongs to one fan.
+    /// </summary>
+    /// <remarks>
+    /// Pairing a single control cannot use the ordinary moving test on its own — that works by
+    /// dropping this fan and watching every other speed hold steady — so the engine falls back to
+    /// matching it against the fan sensor on the same device. For a GPU, which has exactly one of
+    /// each, that is the whole answer.
+    /// </remarks>
+    private Task PairOneAsync(SensorId controlId) => Tuning.PairAsync([controlId]);
 
     /// <summary>
     /// Takes a fan out of the configuration.

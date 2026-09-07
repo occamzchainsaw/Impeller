@@ -177,16 +177,22 @@ public sealed class TuningCoordinator(
             Interlocked.Exchange(ref _running, 0);
         }
 
+        var pairs = run.Pairs.ToDictionary(pair => pair.Key, pair => pair.Value);
+        var byIdentity = PairByIdentity(targets, pairs);
+
         var outcomes = targets.Select(controlId => new TuningOutcome(
             controlId,
             NameOf(controlId),
-            run.Pairs.ContainsKey(controlId),
-            run.Pairs.TryGetValue(controlId, out var tachometer)
-                ? $"Paired with {NameOf(tachometer)}."
+            pairs.ContainsKey(controlId),
+            pairs.TryGetValue(controlId, out var tachometer)
+                ? byIdentity.Contains(controlId)
+                    ? $"Paired with {NameOf(tachometer)} — it is the only fan sensor on the same device, "
+                        + "and moving the control did not change any speed."
+                    : $"Paired with {NameOf(tachometer)}."
                 : "Nothing changed speed with it. The header may be empty, or its fan may have no tacho."))
             .ToList();
 
-        var saved = run.Pairs.Count > 0 && RecordPairs(run.Pairs);
+        var saved = pairs.Count > 0 && RecordPairs(pairs);
 
         Report(TuningKind.Pairing, "Finished", Summarise(outcomes), targets.Count, targets.Count, true);
         return new TuningReport(TuningKind.Pairing, [.. outcomes], cancelled, saved);
@@ -343,14 +349,111 @@ public sealed class TuningCoordinator(
                 Calibration = result.Points,
                 StartDuty = result.StartDuty,
                 StopDuty = result.StopDuty,
+                MinimumDuty = FloorFrom(result, controls[i].MinimumDuty),
             };
         }
 
         return Apply(current with { Controls = [.. controls] });
     }
 
+    /// <summary>
+    /// The lowest duty this fan was actually seen turning at, which becomes the floor the engine
+    /// will not command below.
+    /// </summary>
+    /// <remarks>
+    /// Measuring a stall point and then leaving the floor at zero is what lets a curve ask a fan
+    /// for less than it can physically do. The fan then either sits stalled at a duty the engine
+    /// believes is driving it, or is switched off by the start/stop gate and never asked for
+    /// enough to restart - both of which read as "the fan is dead" rather than as a limit nobody
+    /// wrote down.
+    /// <para>
+    /// Only ever raised, never lowered. Somebody who has deliberately set a floor above what the
+    /// hardware requires - a fan that whines, or one that must never idle slowly - has said
+    /// something a measurement does not overrule.
+    /// </para>
+    /// </remarks>
+    private static Duty FloorFrom(CalibrationResult result, Duty existing)
+    {
+        var lowestTurning = float.MaxValue;
+
+        foreach (var point in result.Points)
+        {
+            if (point.Rpm > 0f && point.Duty.Percent < lowestTurning)
+            {
+                lowestTurning = point.Duty.Percent;
+            }
+        }
+
+        if (lowestTurning is float.MaxValue)
+        {
+            // Nothing in the table turned. That is a fan with no tacho or a header driving
+            // nothing, and neither is evidence about a floor.
+            return existing;
+        }
+
+        return lowestTurning > existing.Percent ? new Duty(lowestTurning) : existing;
+    }
+
+    /// <summary>
+    /// Pairs whatever the moving test could not, using the fact that a control and its tacho are
+    /// usually the same channel of the same device.
+    /// </summary>
+    /// <remarks>
+    /// The moving test works by dropping one control and watching for a speed that falls with it.
+    /// It cannot see a fan that is already as slow as it goes — a GPU at idle, or a header pinned
+    /// at its floor — because there is no drop left to measure, and those fans came out unpaired
+    /// with no RPM readout and no way to calibrate them, which needs a pairing first.
+    /// <para>
+    /// Only ever consulted for controls the measurement did not settle, and only where the answer
+    /// is unambiguous: the same channel of the same device, or a device carrying exactly one fan
+    /// sensor. A measured pairing is always better evidence than a matching channel number, so
+    /// this never overrules one.
+    /// </para>
+    /// </remarks>
+    /// <returns>The controls that were paired this way, for reporting.</returns>
+    private HashSet<SensorId> PairByIdentity(
+        IEnumerable<SensorId> targets,
+        Dictionary<SensorId, SensorId> pairs)
+    {
+        var added = new HashSet<SensorId>();
+
+        var tachometers = registry.Sensors
+            .Where(sensor => sensor.Kind == SensorKind.FanSpeed)
+            .ToList();
+
+        foreach (var controlId in targets)
+        {
+            if (pairs.ContainsKey(controlId)
+                || registry.GetControl(controlId) is not { } control)
+            {
+                continue;
+            }
+
+            var device = control.Fingerprint;
+
+            var candidates = tachometers
+                .Where(sensor => !pairs.ContainsValue(sensor.Id)
+                    && sensor.Fingerprint.ProviderId == device.ProviderId
+                    && sensor.Fingerprint.HardwareKey == device.HardwareKey)
+                .ToList();
+
+            var match = candidates.FirstOrDefault(sensor => sensor.Fingerprint.Channel == device.Channel)
+                ?? (candidates.Count == 1 ? candidates[0] : null);
+
+            if (match is null)
+            {
+                continue;
+            }
+
+            pairs[controlId] = match.Id;
+            added.Add(controlId);
+        }
+
+        return added;
+    }
+
     /// <summary>Writes discovered pairings into the configuration and applies it.</summary>
-    private bool RecordPairs(IReadOnlyDictionary<SensorId, SensorId> pairs)
+    private bool RecordPairs(Dictionary<SensorId, SensorId> pairs)
     {
         var current = configuration.Current;
         var controls = current.Controls.ToArray();

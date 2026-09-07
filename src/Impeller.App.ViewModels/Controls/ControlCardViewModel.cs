@@ -57,11 +57,14 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
     private readonly Func<ControlBindingDefinition, Task> _save;
     private readonly Func<SensorId, Task> _remove;
     private readonly Func<string?, string?> _nameClaimant;
+    private readonly Func<SensorId, Task> _calibrate;
+    private readonly Func<SensorId, Task> _pair;
     private readonly ThrottledWriter<Duty> _writer;
 
     private ControlBindingDefinition _binding;
     private bool _suppressWrite;
     private bool _suppressCurve;
+    private bool _suppressLimits;
 
     public ControlCardViewModel(
         ControlDescriptor? descriptor,
@@ -71,7 +74,9 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
         NotificationCenter notify,
         Func<ControlBindingDefinition, Task> save,
         Func<SensorId, Task> remove,
-        Func<string?, string?> nameClaimant)
+        Func<string?, string?> nameClaimant,
+        Func<SensorId, Task> calibrate,
+        Func<SensorId, Task> pair)
     {
         ArgumentNullException.ThrowIfNull(binding);
         ArgumentNullException.ThrowIfNull(connection);
@@ -79,12 +84,16 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
         ArgumentNullException.ThrowIfNull(save);
         ArgumentNullException.ThrowIfNull(remove);
         ArgumentNullException.ThrowIfNull(nameClaimant);
+        ArgumentNullException.ThrowIfNull(calibrate);
+        ArgumentNullException.ThrowIfNull(pair);
 
         _connection = connection;
         _notify = notify;
         _save = save;
         _remove = remove;
         _nameClaimant = nameClaimant;
+        _calibrate = calibrate;
+        _pair = pair;
         _binding = binding;
         _writer = new ThrottledWriter<Duty>(TimeProvider.System, WriteInterval, SendDutyAsync);
 
@@ -209,6 +218,39 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
     [ObservableProperty]
     public partial string RequestedDetail { get; private set; } = string.Empty;
 
+    /// <summary>
+    /// This fan's own duty range, always shown, whether or not anything is currently disagreeing
+    /// with it.
+    /// </summary>
+    /// <remarks>
+    /// Its absence is what made a floor impossible to reason about: calibration measured the duty
+    /// below which a fan stalls, the engine obeyed it, and the only place it ever appeared was a
+    /// tooltip that showed up after the fan had already stopped. A limit that governs a fan every
+    /// tick belongs on the fan, in view, before it surprises anybody.
+    /// </remarks>
+    [ObservableProperty]
+    public partial string LimitsText { get; private set; } = string.Empty;
+
+    /// <summary>Where <see cref="LimitsText"/> came from, for hovering over it.</summary>
+    [ObservableProperty]
+    public partial string LimitsDetail { get; private set; } = string.Empty;
+
+    /// <summary>The floor, as an editable number.</summary>
+    [ObservableProperty]
+    public partial double FloorPercent { get; set; }
+
+    /// <summary>The ceiling, as an editable number.</summary>
+    [ObservableProperty]
+    public partial double CeilingPercent { get; set; } = 100d;
+
+    /// <summary>What calibration measured, or a line saying it has not run.</summary>
+    [ObservableProperty]
+    public partial string MeasuredText { get; private set; } = "Not calibrated.";
+
+    /// <summary>Whether a tacho has been paired with this fan.</summary>
+    [ObservableProperty]
+    public partial bool IsPaired { get; private set; }
+
     /// <summary>What is deciding this fan's speed, named for a person.</summary>
     [ObservableProperty]
     public partial string HolderText { get; private set; } = "Not driven";
@@ -310,6 +352,7 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
 
         _binding = binding;
         SyncCurves(curves);
+        DescribeLimits(binding);
         ModeOffLabel = binding.CurveId.IsNone ? "Off" : "Curve";
 
         // The engine's own rule, and nothing more. This used to require a curve as well, which is
@@ -441,6 +484,81 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
                 + "minimum duty above that to keep it turning."
             : $"{asker} {requested}. The fan is at {commanded?.ToString() ?? "nothing"}, held there "
                 + "by this fan's own limits or its ramp rate.";
+    }
+
+    /// <summary>
+    /// Brings the limits shown on the card into line with the binding.
+    /// </summary>
+    /// <remarks>
+    /// Writes the editable numbers under the suppression flag, because setting them raises the
+    /// change handler that saves them - and a snapshot arriving while somebody is typing would
+    /// otherwise save the value it just overwrote them with.
+    /// </remarks>
+    private void DescribeLimits(ControlBindingDefinition binding)
+    {
+        _suppressLimits = true;
+        FloorPercent = binding.MinimumDuty.Percent;
+        CeilingPercent = binding.MaximumDuty.Percent;
+        _suppressLimits = false;
+
+        IsPaired = !binding.PairedFanSensorId.IsNone;
+
+        LimitsText = binding.MinimumDuty.IsOff && binding.MaximumDuty.Percent >= 100f
+            ? string.Empty
+            : $"{binding.MinimumDuty.Percent:0}–{binding.MaximumDuty.Percent:0}%";
+
+        LimitsDetail = binding.MinimumDuty.IsOff
+            ? "This fan will be driven anywhere from a standstill to full speed."
+            : $"This fan is never commanded below {binding.MinimumDuty} — it stalls under that. "
+                + "A curve asking for less gets the floor instead of stopping the fan.";
+
+        MeasuredText = binding.Calibration.Count == 0
+            ? "Not calibrated. Measure this fan to learn the speed each duty produces and the "
+                + "duty below which it stalls."
+            : $"Measured: {binding.Calibration.Count} points, starts at {binding.StartDuty}, "
+                + $"stalls below {binding.StopDuty}.";
+    }
+
+    /// <summary>Saves a floor the user typed.</summary>
+    partial void OnFloorPercentChanged(double value) => SaveLimits();
+
+    /// <summary>Saves a ceiling the user typed.</summary>
+    partial void OnCeilingPercentChanged(double value) => SaveLimits();
+
+    /// <summary>
+    /// Writes both limits back, with the floor never above the ceiling.
+    /// </summary>
+    /// <remarks>
+    /// Clamped here rather than left to the engine, because an inverted pair is a state the user
+    /// passes through while typing - dragging a floor up past a ceiling - and rejecting it would
+    /// mean refusing a number mid-edit.
+    /// </remarks>
+    private void SaveLimits()
+    {
+        if (_suppressLimits)
+        {
+            return;
+        }
+
+        var floor = (float)Math.Clamp(FloorPercent, 0d, 100d);
+        var ceiling = (float)Math.Clamp(CeilingPercent, 0d, 100d);
+
+        if (floor > ceiling)
+        {
+            floor = ceiling;
+        }
+
+        if (Math.Abs(floor - _binding.MinimumDuty.Percent) < 0.01f
+            && Math.Abs(ceiling - _binding.MaximumDuty.Percent) < 0.01f)
+        {
+            return;
+        }
+
+        _ = _save(_binding with
+        {
+            MinimumDuty = new Duty(floor),
+            MaximumDuty = new Duty(ceiling),
+        });
     }
 
     /// <summary>Whether the user currently has the name field open.</summary>
@@ -627,6 +745,20 @@ public sealed partial class ControlCardViewModel : ObservableObject, IAsyncDispo
     /// </remarks>
     [RelayCommand]
     private Task RemoveAsync() => _remove(Id);
+
+    /// <summary>
+    /// Measures this fan alone: its duty-to-speed table, and the duties that start and stall it.
+    /// </summary>
+    /// <remarks>
+    /// Minutes rather than the quarter of an hour a whole-machine run costs, and it is the only
+    /// way to re-measure a fan that has been swapped without re-measuring seven that have not.
+    /// </remarks>
+    [RelayCommand]
+    private Task CalibrateAsync() => _calibrate(Id);
+
+    /// <summary>Works out which tacho belongs to this fan.</summary>
+    [RelayCommand]
+    private Task PairAsync() => _pair(Id);
 
     /// <summary>
     /// Brings the picker's list to match, touching only the entries that actually moved.
