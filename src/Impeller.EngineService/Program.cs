@@ -7,6 +7,7 @@ using Impeller.Core.Engine.Tuning;
 using Impeller.Core.Persistence;
 using Impeller.EngineService;
 using Impeller.EngineService.Ipc;
+using Impeller.Hardware.Adlx;
 using Impeller.Hardware.Lhm;
 using Impeller.Plugins.Host;
 using Microsoft.Extensions.Logging.EventLog;
@@ -112,6 +113,14 @@ builder.Services.AddSingleton<ISensorNames>(sp => sp.GetRequiredService<JsonSens
 
 builder.Services.Configure<LhmOptions>(builder.Configuration.GetSection(LhmOptions.SectionName));
 builder.Services.AddSingleton<ISensorProvider, LhmSensorProvider>();
+
+// AMD GPU fans, which LibreHardwareMonitor cannot drive. Its AMD path is the legacy ADL Overdrive
+// interface, and recent drivers accept those writes and ignore them: a duty swept from 1% to 100%
+// on an RDNA-era card moves the fan by a few RPM while the control reports itself perfectly
+// healthy. This provider talks to AMD's current library instead, and exposes nothing but the fan
+// control - every readable GPU sensor still comes from LibreHardwareMonitor, so a GPU temperature
+// keeps one identity.
+builder.Services.AddSingleton<ISensorProvider, AdlxSensorProvider>();
 
 // The engine's own computed sensors, exposed through the same interface as the hardware backends
 // so that nothing downstream has to know the difference. Registered last so it refreshes after

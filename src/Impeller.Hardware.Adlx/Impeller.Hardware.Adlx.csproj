@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- ADLX is AMD's Windows driver library, reached by direct interop. -->
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Description>ADLX-backed fan control for AMD GPUs, which LibreHardwareMonitor's legacy Overdrive path can no longer drive.</Description>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Impeller.Core.Abstractions\Impeller.Core.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Impeller.Hardware.Adlx.Tests" />
+  </ItemGroup>
+
+</Project>

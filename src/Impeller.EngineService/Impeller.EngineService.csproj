@@ -41,6 +41,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Impeller.Core.Engine\Impeller.Core.Engine.csproj" />
     <ProjectReference Include="..\Impeller.Core.Persistence\Impeller.Core.Persistence.csproj" />
+    <ProjectReference Include="..\Impeller.Hardware.Adlx\Impeller.Hardware.Adlx.csproj" />
     <ProjectReference Include="..\Impeller.Hardware.Lhm\Impeller.Hardware.Lhm.csproj" />
     <ProjectReference Include="..\Impeller.Plugins.Host\Impeller.Plugins.Host.csproj" />
     <ProjectReference Include="..\Impeller.Ipc.Contracts\Impeller.Ipc.Contracts.csproj" />
