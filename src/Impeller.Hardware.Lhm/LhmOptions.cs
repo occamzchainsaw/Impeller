@@ -43,6 +43,26 @@ public sealed class LhmOptions
     public bool EnableBattery { get; set; }
 
     /// <summary>
+    /// Whether to hide LibreHardwareMonitor's AMD GPU fan controls, which no longer work.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// On by default, and the default is the honest one. LibreHardwareMonitor drives AMD fans
+    /// through the legacy ADL Overdrive interface, and recent drivers accept those writes and
+    /// ignore them: on an RDNA-era card a duty swept from 1% to 100% moves the fan by a handful of
+    /// RPM. The control reports itself healthy and holds whatever duty it was last given, so
+    /// nothing in the app can tell that it does nothing — which makes it worse than no control at
+    /// all, because a curve pointed at it looks configured and silently governs nothing.
+    /// </para>
+    /// <para>
+    /// The ADLX provider (<c>Impeller.Hardware.Adlx</c>) provides the working control for these
+    /// cards. Only controls are hidden: every readable GPU sensor still comes from here, so
+    /// temperatures and speeds keep the identity their saved configurations already reference.
+    /// </para>
+    /// </remarks>
+    public bool HideAmdGpuControls { get; set; } = true;
+
+    /// <summary>
     /// Cadence for hardware that is expensive to read — storage and network.
     /// </summary>
     /// <remarks>

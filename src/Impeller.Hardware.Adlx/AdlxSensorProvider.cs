@@ -133,39 +133,60 @@ public sealed unsafe class AdlxSensorProvider : ISensorProvider
     /// <summary>Raises <see cref="TopologyChanged"/>, for a GPU appearing or leaving.</summary>
     private void OnTopologyChanged() => TopologyChanged?.Invoke(this, EventArgs.Empty);
 
+    /// <summary>
+    /// ADLX is present but would not answer, reported as a named group rather than as a failure.
+    /// </summary>
+    /// <remarks>
+    /// Succeeded stays true on purpose. A machine whose AMD driver will not talk to us still has
+    /// working motherboard fan control, and failing the provider would be claiming otherwise. The
+    /// group name carries the call and the code, so the reason reaches the engine log and the
+    /// diagnostics bundle instead of being swallowed.
+    /// </remarks>
+    private static ProviderInitializationResult Unavailable(string call, AdlxResult result) =>
+        new(true, 0, 0, [$"AMD ADLX ({call} returned {result})"]);
+
     private ProviderInitializationResult Initialize()
     {
         ulong version;
 
         // The runtime's own version rather than a compiled-in constant. ADLX refuses a version it
         // does not recognise, and asking it what it is cannot be wrong.
-        if (Adlx.ADLXQueryFullVersion(&version) != AdlxResult.Ok)
+        var queried = Adlx.ADLXQueryFullVersion(&version);
+
+        if (queried != AdlxResult.Ok)
         {
-            return ProviderInitializationResult.Success(0, 0);
+            return Unavailable("ADLXQueryFullVersion", queried);
         }
 
         void* system;
+        var started = Adlx.ADLXInitialize(version, &system);
 
-        if (Adlx.ADLXInitialize(version, &system) != AdlxResult.Ok)
+        if (started != AdlxResult.Ok)
         {
-            return ProviderInitializationResult.Success(0, 0);
+            // The one that matters in practice. The engine is a service running as LocalSystem
+            // with no desktop, and if ADLX turns out to require a user session this is where it
+            // says so — as a named group in the engine log rather than as a provider that quietly
+            // found no hardware.
+            return Unavailable("ADLXInitialize", started);
         }
 
         _initialized = true;
         _system = system;
 
         void* gpus;
+        var listed = Adlx.Out(_system, Adlx.System.GetGPUs, &gpus);
 
-        if (Adlx.Out(_system, Adlx.System.GetGPUs, &gpus) != AdlxResult.Ok)
+        if (listed != AdlxResult.Ok)
         {
-            return ProviderInitializationResult.Success(0, 0);
+            return Unavailable("GetGPUs", listed);
         }
 
         void* tuningServices;
+        var tuned = Adlx.Out(_system, Adlx.System.GetGPUTuningServices, &tuningServices);
 
-        if (Adlx.Out(_system, Adlx.System.GetGPUTuningServices, &tuningServices) != AdlxResult.Ok)
+        if (tuned != AdlxResult.Ok)
         {
-            return ProviderInitializationResult.Success(0, 0);
+            return Unavailable("GetGPUTuningServices", tuned);
         }
 
         _tuningServices = tuningServices;

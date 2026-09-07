@@ -214,13 +214,13 @@ public sealed class LhmSensorProvider : ISensorProvider
             var fingerprint = new HardwareFingerprint(ProviderId, hardwareKey, sensor.Index, kind);
             var id = _identityMap.GetOrCreate(fingerprint);
 
-            if (sensor.Control is not null && kind == SensorKind.Control)
+            if (sensor.Control is not null && kind == SensorKind.Control && !IsDeadAmdGpuControl(hardware))
             {
                 var control = new LhmControl(id, sensor, fingerprint, _gate);
                 controls.Add(control);
                 sensors.Add(control);
             }
-            else
+            else if (kind != SensorKind.Control || sensor.Control is null)
             {
                 sensors.Add(new LhmSensor(id, sensor, fingerprint));
             }
@@ -231,6 +231,19 @@ public sealed class LhmSensorProvider : ISensorProvider
             Walk(sub, sensors, controls);
         }
     }
+
+    /// <summary>
+    /// Whether this is an AMD GPU fan control that LibreHardwareMonitor cannot actually drive.
+    /// </summary>
+    /// <remarks>
+    /// Hidden rather than exposed-and-marked, because there is no honest way to show it. It looks
+    /// identical to a working control from every angle the app can see: it accepts writes, returns
+    /// success, and reports the duty it was given. The only evidence is the tachometer refusing to
+    /// move, which is a thing the user hears rather than something the control admits to.
+    /// See <see cref="LhmOptions.HideAmdGpuControls"/>.
+    /// </remarks>
+    private bool IsDeadAmdGpuControl(IHardware hardware) =>
+        _options.HideAmdGpuControls && hardware.HardwareType == HardwareType.GpuAmd;
 
     /// <summary>
     /// Groups that were asked for but produced no hardware.
