@@ -38,6 +38,9 @@ public sealed class TuningCoordinator(
 
     private int _running;
 
+    /// <summary>Whether this coordinator is the thing currently holding grants suspended.</summary>
+    private bool _suspendedGrants;
+
     /// <summary>How long each sample takes. One second, matching the tick rate.</summary>
     public TimeSpan SampleInterval { get; init; } = TimeSpan.FromSeconds(1);
 
@@ -293,6 +296,15 @@ public sealed class TuningCoordinator(
             }
         }
 
+        // Held for the whole run, not merely taken at the start of one. Refusing to begin while a
+        // plugin holds a fan is not enough on its own: a plugin that connects, or reconnects, a
+        // few seconds into a run claims its fan back and moves it — and a run works by moving one
+        // fan at a time and attributing everything that changes to that fan. A pairing run in that
+        // state does not fail. It produces a confident, wrong answer, which is how a GPU came to be
+        // paired with the tacho of somebody else's case fan.
+        ownership.SuspendGrants();
+        _suspendedGrants = true;
+
         return null;
     }
 
@@ -305,6 +317,14 @@ public sealed class TuningCoordinator(
     /// </remarks>
     private void ReleaseAll(List<SensorId> controlIds)
     {
+        // Only if this coordinator suspended them. Grants are also suspended by a failsafe, and a
+        // tuning run tidying up must not be what re-arms plugin claims on a machine in trouble.
+        if (_suspendedGrants)
+        {
+            ownership.ResumeGrants();
+            _suspendedGrants = false;
+        }
+
         foreach (var controlId in controlIds)
         {
             ownership.Release(controlId, Claimant);
