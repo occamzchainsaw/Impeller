@@ -18,7 +18,7 @@ namespace Impeller.Hardware.Adlx;
 /// providers, exactly as it does when a Super I/O chip is unreadable.
 /// </para>
 /// </remarks>
-public sealed unsafe class AdlxSensorProvider : ISensorProvider
+public sealed unsafe class AdlxSensorProvider(ISensorIdentityMap identityMap) : ISensorProvider
 {
     /// <summary>
     /// Serialises every ADLX call. The library is not documented as thread-safe, the tick loop
@@ -26,6 +26,9 @@ public sealed unsafe class AdlxSensorProvider : ISensorProvider
     /// the display with it.
     /// </summary>
     private readonly Lock _gate = new();
+
+    private readonly ISensorIdentityMap _identityMap =
+        identityMap ?? throw new ArgumentNullException(nameof(identityMap));
 
     private readonly List<ISensor> _sensors = [];
     private readonly List<IControl> _controls = [];
@@ -249,8 +252,13 @@ public sealed unsafe class AdlxSensorProvider : ISensorProvider
 
         var fingerprint = new HardwareFingerprint(ProviderId, $"/gpu/{index}", 0, SensorKind.Control);
 
+        // From the persistent map, not SensorId.New(). A random id here meant this control got a
+        // different identity every time the service restarted — every reinstall, every reboot —
+        // and any binding, pairing or calibration saved against the old one went stale on the very
+        // next start. That is the actual reason pairing never held: the control the user paired
+        // yesterday was not the control being driven today.
         var fan = new AdlxGpuFan(
-            SensorId.New(),
+            _identityMap.GetOrCreate(fingerprint),
             $"AMD GPU {index}",
             fingerprint,
             fanTuning,
