@@ -226,8 +226,10 @@ public sealed class PluginSdkTests
     }
 
     [Fact]
-    public async Task A_hardware_declaration_is_answered_rather_than_refused()
+    public async Task A_hardware_declaration_from_an_unapproved_plugin_is_answered_rather_than_refused()
     {
+        // Pending, not yet approved for anything — DeclareHardwareAsync still answers with a real
+        // outcome rather than throwing or hanging, the same courtesy AcquireAsync and the rest get.
         await using var rig = new SdkRig();
 
         rig.Client.Start();
@@ -236,7 +238,8 @@ public sealed class PluginSdkTests
         var answer = await rig.Client.DeclareHardwareAsync(
             [new HardwareDeclaration("pump", "Pump", [], [])]);
 
-        Assert.Equal(ProviderOutcome.NotImplementedInThisBuild, answer.Outcome);
+        Assert.False(answer.Accepted);
+        Assert.Equal(ProviderOutcome.NotRequested, answer.Outcome);
     }
 
     [Fact]
@@ -324,6 +327,7 @@ public sealed class PluginSdkTests
                 Ownership,
                 Plugins,
                 new JsonSensorNames(Path.Combine(_root, StateLocation.NamesName)),
+                new PluginHardwareProvider(new InMemorySensorIdentityMap()),
                 "1.0-test",
                 TimeProvider.System);
 

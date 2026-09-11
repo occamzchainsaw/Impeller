@@ -37,6 +37,7 @@ public sealed partial class PluginHost : IAsyncDisposable
     private readonly PluginHostOptions _options;
     private readonly TimeProvider _time;
     private readonly ILogger _logger;
+    private readonly PluginHardwareProvider _hardware;
 
     private readonly Lock _gate = new();
     private readonly Dictionary<string, PluginSession> _admitted = new(StringComparer.Ordinal);
@@ -50,6 +51,7 @@ public sealed partial class PluginHost : IAsyncDisposable
     /// <param name="ownership">Who holds what.</param>
     /// <param name="plugins">What the user has approved.</param>
     /// <param name="names">The user's own names for this machine's fans and sensors.</param>
+    /// <param name="hardware">Where a plugin's own declared sensors and controls are kept.</param>
     /// <param name="engineVersion">This engine's version, for admissions to carry.</param>
     /// <param name="timeProvider">The clock.</param>
     /// <param name="options">Timings, or the defaults.</param>
@@ -60,6 +62,7 @@ public sealed partial class PluginHost : IAsyncDisposable
         ControlOwnershipRegistry ownership,
         PluginRegistry plugins,
         ISensorNames names,
+        PluginHardwareProvider hardware,
         string engineVersion,
         TimeProvider timeProvider,
         PluginHostOptions? options = null,
@@ -73,6 +76,7 @@ public sealed partial class PluginHost : IAsyncDisposable
         _registry = registry;
         _names = names ?? throw new ArgumentNullException(nameof(names));
         _plugins = plugins;
+        _hardware = hardware ?? throw new ArgumentNullException(nameof(hardware));
         _options = options ?? new PluginHostOptions();
         _time = timeProvider;
         _logger = logger ?? NullLogger<PluginHost>.Instance;
@@ -101,6 +105,9 @@ public sealed partial class PluginHost : IAsyncDisposable
 
     /// <summary>Who holds what.</summary>
     internal ControlOwnershipRegistry Ownership { get; }
+
+    /// <summary>Sensors and controls plugins have declared.</summary>
+    public PluginHardwareProvider Hardware => _hardware;
 
     /// <summary>This engine's version, as told to plugins.</summary>
     public string EngineVersion { get; }
@@ -334,6 +341,12 @@ public sealed partial class PluginHost : IAsyncDisposable
             {
                 Log.Released(_logger, pluginId, freed);
             }
+
+            // After releasing claims, not before: a plugin holding a granted fan and a plugin
+            // driving its own declared one leave by the same door, and the order only matters
+            // because withdrawing hardware this session declared removes it from the registry
+            // outright rather than returning it to a curve.
+            _hardware.Withdraw(pluginId);
         }
 
         await session.DisposeAsync().ConfigureAwait(false);

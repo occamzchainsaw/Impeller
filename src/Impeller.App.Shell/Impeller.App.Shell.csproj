@@ -93,6 +93,14 @@
     <ProjectReference Include="..\Impeller.App.ViewModels\Impeller.App.ViewModels.csproj" />
     <ProjectReference Include="..\Impeller.Platform.Windows\Impeller.Platform.Windows.csproj" />
     <ProjectReference Include="..\Impeller.Core.Abstractions\Impeller.Core.Abstractions.csproj" />
+
+    <!--
+      AMD GPU fan control. It lives here, in the shell, rather than in the engine service:
+      AMD's ADLX library only grants full fan-tuning functionality to a process in an interactive
+      session, and the engine runs as a Session-0 service. This process is the interactive session.
+    -->
+    <ProjectReference Include="..\Impeller.Hardware.Adlx\Impeller.Hardware.Adlx.csproj" />
+    <ProjectReference Include="..\Impeller.Plugins.Sdk\Impeller.Plugins.Sdk.csproj" />
   </ItemGroup>
 
 </Project>

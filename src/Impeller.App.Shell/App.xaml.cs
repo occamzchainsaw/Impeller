@@ -31,6 +31,7 @@ public partial class App : Application, IDisposable
 {
     private Window? _window;
     private TrayIcon? _tray;
+    private AdlxGpuPlugin? _adlx;
 
     private static partial class Log
     {
@@ -107,6 +108,10 @@ public partial class App : Application, IDisposable
             sp.GetRequiredService<EngineConnection>(),
             sp.GetRequiredService<NotificationCenter>()));
 
+        // The AMD GPU fan control this shell hands the engine over the plugin pipe — see
+        // AdlxGpuPlugin's own remarks for why it lives here rather than in the engine service.
+        services.AddSingleton<AdlxGpuPlugin>();
+
         // Transient: a page navigated away from is discarded along with its view model, so
         // returning to it starts from a clean state rather than one the user last left behind.
         services.AddTransient<DashboardViewModel>();
@@ -153,6 +158,11 @@ public partial class App : Application, IDisposable
         // Started before the window so the first page to open finds a connection already in
         // progress rather than one that begins when it happens to be looked at.
         connection.Start();
+
+        // Fire-and-forget: opening ADLX and declaring the GPU fan takes a moment and must never
+        // hold up the window. A machine with no AMD GPU costs nothing beyond the attempt.
+        _adlx = GetService<AdlxGpuPlugin>();
+        _ = _adlx.StartAsync();
 
         // After the connection and before the window, but it waits twenty seconds before doing
         // anything, so it is behind both.
@@ -234,6 +244,8 @@ public partial class App : Application, IDisposable
     {
         _tray?.Dispose();
         _tray = null;
+        _ = _adlx?.DisposeAsync().AsTask();
+        _adlx = null;
         ShellLogging.Close();
         GC.SuppressFinalize(this);
     }

@@ -281,15 +281,57 @@ public sealed class PluginSession : IPluginHost, IAsyncDisposable
     /// <inheritdoc />
     public Task<HardwareAdmission> DeclareHardwareAsync(
         IReadOnlyList<HardwareDeclaration> hardware,
-        CancellationToken cancellationToken = default) =>
-        // Answered honestly rather than refused: an author whose declaration comes back as a
-        // permissions failure goes looking for a grant that does not exist.
-        Task.FromResult(HardwareAdmission.NotImplemented());
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(hardware);
+
+        if (!IsAdmitted || PluginId is not { } pluginId || Manifest is not { } manifest)
+        {
+            return Task.FromResult(new HardwareAdmission(
+                ProviderOutcome.NotRequested,
+                null,
+                new Dictionary<string, SensorRef>(),
+                new Dictionary<string, SensorRef>(),
+                "This connection has not been admitted. Call HelloAsync first."));
+        }
+
+        if (!manifest.Requests.Contains(PluginCapability.ProvideHardware))
+        {
+            return Task.FromResult(new HardwareAdmission(
+                ProviderOutcome.NotRequested,
+                null,
+                new Dictionary<string, SensorRef>(),
+                new Dictionary<string, SensorRef>(),
+                "This plugin's manifest did not request ProvideHardware."));
+        }
+
+        if (Admission?.Has(PluginCapability.ProvideHardware) != true)
+        {
+            return Task.FromResult(new HardwareAdmission(
+                ProviderOutcome.NotPermitted,
+                null,
+                new Dictionary<string, SensorRef>(),
+                new Dictionary<string, SensorRef>(),
+                $"'{manifest.DisplayName}' has not been granted permission to provide hardware in Impeller."));
+        }
+
+        return Task.FromResult(_host.Hardware.Admit(this, pluginId, hardware));
+    }
 
     /// <inheritdoc />
     public Task PushReadingsAsync(
         IReadOnlyList<ProvidedReading> readings,
-        CancellationToken cancellationToken = default) => Task.CompletedTask;
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(readings);
+
+        if (IsAdmitted && PluginId is { } pluginId && Admission?.Has(PluginCapability.ProvideHardware) == true)
+        {
+            _host.Hardware.ApplyReadings(pluginId, readings);
+        }
+
+        return Task.CompletedTask;
+    }
 
     // ---- the engine's side ----------------------------------------------------------------
 

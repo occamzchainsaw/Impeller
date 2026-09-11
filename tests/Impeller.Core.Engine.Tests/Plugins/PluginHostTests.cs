@@ -681,10 +681,11 @@ public sealed class PluginHostTests
     }
 
     [Fact]
-    public async Task A_hardware_declaration_is_answered_as_not_implemented_rather_than_refused()
+    public async Task A_hardware_declaration_from_a_plugin_that_never_asked_is_answered_as_not_requested()
     {
-        // An author whose declaration comes back as a permissions failure goes looking for a grant
-        // that does not exist.
+        // Requesting is not being granted, and the shared Manifest above never asks for
+        // ProvideHardware — so this is the ordinary case for every other test in this file, not a
+        // special one.
         await using var rig = new Rig();
         await using var plug = rig.Connect();
         await rig.AdmitAndGrantAsync(plug);
@@ -692,8 +693,59 @@ public sealed class PluginHostTests
         var answer = await plug.Engine.DeclareHardwareAsync(
             [new HardwareDeclaration("pump", "Pump", [], [])]);
 
-        Assert.Equal(ProviderOutcome.NotImplementedInThisBuild, answer.Outcome);
-        Assert.Contains("nothing is wrong with your plugin", answer.Message, StringComparison.Ordinal);
+        Assert.False(answer.Accepted);
+        Assert.Equal(ProviderOutcome.NotRequested, answer.Outcome);
+    }
+
+    [Fact]
+    public async Task A_hardware_declaration_from_a_permitted_plugin_is_accepted()
+    {
+        await using var rig = new Rig();
+        await using var plug = rig.Connect();
+
+        var manifest = Manifest with { Requests = [PluginCapability.ProvideHardware] };
+        await plug.Engine.HelloAsync(manifest);
+        rig.Plugins.Approve(PluginId, [PluginCapability.ProvideHardware], []);
+
+        await Until(
+            () => plug.Session.Admission?.Has(PluginCapability.ProvideHardware) == true,
+            "the grant to reach the session");
+
+        var declaration = new HardwareDeclaration(
+            "gpu",
+            "Test GPU",
+            [],
+            [new DeclaredControl("fan0", "GPU Fan", false, 100f)]);
+
+        var admission = await plug.Engine.DeclareHardwareAsync([declaration]);
+
+        Assert.True(admission.Accepted, admission.Message);
+        Assert.Equal($"plugin:{PluginId}", admission.ProviderId);
+        Assert.True(admission.Controls.ContainsKey("fan0"));
+    }
+
+    [Fact]
+    public async Task Withdrawing_a_declaration_on_disconnect_removes_it_from_the_provider()
+    {
+        await using var rig = new Rig();
+        var plug = rig.Connect();
+
+        var manifest = Manifest with { Requests = [PluginCapability.ProvideHardware] };
+        await plug.Engine.HelloAsync(manifest);
+        rig.Plugins.Approve(PluginId, [PluginCapability.ProvideHardware], []);
+
+        await Until(
+            () => plug.Session.Admission?.Has(PluginCapability.ProvideHardware) == true,
+            "the grant to reach the session");
+
+        await plug.Engine.DeclareHardwareAsync(
+            [new HardwareDeclaration("gpu", "Test GPU", [], [new DeclaredControl("fan0", "GPU Fan", false, 100f)])]);
+
+        Assert.Single(rig.Host.Hardware.Controls);
+
+        await plug.DisposeAsync();
+
+        await Until(() => rig.Host.Hardware.Controls.Count == 0, "the withdrawal to reach the provider");
     }
 
     [Fact]
@@ -769,6 +821,7 @@ public sealed class PluginHostTests
                 Ownership,
                 Plugins,
                 Names,
+                new PluginHardwareProvider(new InMemorySensorIdentityMap()),
                 "1.0.0-test",
                 TimeProvider.System,
                 options);
