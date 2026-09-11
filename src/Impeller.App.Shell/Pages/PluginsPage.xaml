@@ -127,23 +127,35 @@
                                     Text="{x:Bind ProgramText, Mode=OneWay}"
                                     TextWrapping="Wrap" />
 
-                                <InfoBar
-                                    IsClosable="False"
-                                    IsOpen="{x:Bind WantsHardwareProvision, Mode=OneWay}"
-                                    Message="This plugin also offers hardware of its own. Impeller speaks that part of the contract but does not implement it yet, so there is nothing here to grant and nothing is wrong."
-                                    Severity="Informational" />
-
                                 <!--  What it may read. All or nothing, because per-sensor consent is a dialog nobody would read.  -->
                                 <CheckBox
                                     Content="May read this machine's sensors"
                                     IsChecked="{x:Bind GrantReadSensors, Mode=TwoWay}"
                                     Visibility="{x:Bind local:PluginsPage.When(WantsReadSensors)}" />
 
-                                <!--  Which fans it may drive. Per fan, which is the whole point of the grant list.  -->
+                                <!--
+                                    Whether it may hand the engine hardware of its own — an AMD GPU
+                                    fan reached from the user's session, say. All or nothing, the
+                                    same shape as the read grant above: there is exactly one thing
+                                    to decide, not one per device.
+                                -->
+                                <CheckBox
+                                    Content="May offer the engine its own hardware"
+                                    IsChecked="{x:Bind GrantProvideHardware, Mode=TwoWay}"
+                                    Visibility="{x:Bind local:PluginsPage.When(WantsHardwareProvision)}" />
+
+                                <!--
+                                    Which fans it may drive. Per fan, which is the whole point of the
+                                    grant list. Hidden entirely for a plugin that never asked to drive
+                                    a fan at all - an empty "fans it may drive" section on a plugin
+                                    that only reads sensors, or only offers its own hardware, is not
+                                    an empty state, it is a question the plugin never asked.
+                                -->
                                 <Expander
                                     HorizontalAlignment="Stretch"
                                     HorizontalContentAlignment="Stretch"
-                                    Header="Fans it may drive">
+                                    Header="Fans it may drive"
+                                    Visibility="{x:Bind local:PluginsPage.When(WantsControlFans)}">
                                     <StackPanel Spacing="6">
                                         <!--  An empty box is indistinguishable from a broken one, so it says why it is empty.  -->
                                         <TextBlock
@@ -174,7 +186,7 @@
                                     <Button
                                         Command="{x:Bind ApproveCommand}"
                                         Content="Apply"
-                                        IsEnabled="{x:Bind local:PluginsPage.HasText(Id)}"
+                                        IsEnabled="{x:Bind local:PluginsPage.CanApply(CanApply, Id), Mode=OneWay}"
                                         Style="{StaticResource AccentButtonStyle}"
                                         ToolTipService.ToolTip="Grant exactly what is ticked above, and nothing else." />
 

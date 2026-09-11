@@ -75,15 +75,20 @@ public sealed partial class PluginCardViewModel : ObservableObject
 
         foreach (var fan in fans)
         {
+            Watch(fan);
             Fans.Add(fan);
         }
 
         WantsReadSensors = summary.Granted.Contains(PluginCapability.ReadSensors)
             || summary.Requested.Contains(PluginCapability.ReadSensors);
 
+        WantsControlFans = summary.Granted.Contains(PluginCapability.ControlFans)
+            || summary.Requested.Contains(PluginCapability.ControlFans);
+
         HasFans = Fans.Count > 0;
 
         GrantReadSensors = summary.Granted.Contains(PluginCapability.ReadSensors);
+        GrantProvideHardware = summary.Granted.Contains(PluginCapability.ProvideHardware);
     }
 
     /// <summary>The engine's word on this plugin.</summary>
@@ -115,6 +120,7 @@ public sealed partial class PluginCardViewModel : ObservableObject
         OnPropertyChanged(nameof(StateText));
         OnPropertyChanged(nameof(GrantsText));
         OnPropertyChanged(nameof(ProgramText));
+        OnPropertyChanged(nameof(CanApply));
 
         var replacements = fans.ToArray();
 
@@ -125,16 +131,35 @@ public sealed partial class PluginCardViewModel : ObservableObject
             || !replacements.Zip(Fans).All(pair =>
                 pair.First.Id == pair.Second.Id && pair.First.Claimable == pair.Second.Claimable))
         {
+            foreach (var fan in Fans)
+            {
+                fan.PropertyChanged -= OnFanChanged;
+            }
+
             Fans.Clear();
 
             foreach (var fan in replacements)
             {
+                Watch(fan);
                 Fans.Add(fan);
             }
 
             HasFans = Fans.Count > 0;
             OnPropertyChanged(nameof(HasFans));
             GrantReadSensors = summary.Granted.Contains(PluginCapability.ReadSensors);
+            GrantProvideHardware = summary.Granted.Contains(PluginCapability.ProvideHardware);
+            OnPropertyChanged(nameof(CanApply));
+        }
+    }
+
+    /// <summary>Recomputes <see cref="CanApply"/> whenever a fan's tick box moves.</summary>
+    private void Watch(GrantedFanViewModel fan) => fan.PropertyChanged += OnFanChanged;
+
+    private void OnFanChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(GrantedFanViewModel.Granted))
+        {
+            OnPropertyChanged(nameof(CanApply));
         }
     }
 
@@ -159,9 +184,20 @@ public sealed partial class PluginCardViewModel : ObservableObject
     /// <summary>Whether it asked for reads at all, so the tick box is worth showing.</summary>
     public bool WantsReadSensors { get; }
 
+    /// <summary>Whether it asked to drive fans at all, so the section is worth showing.</summary>
+    public bool WantsControlFans { get; }
+
     /// <summary>Whether reads are currently granted.</summary>
     [ObservableProperty]
     public partial bool GrantReadSensors { get; set; }
+
+    partial void OnGrantReadSensorsChanged(bool value) => OnPropertyChanged(nameof(CanApply));
+
+    /// <summary>Whether this plugin may hand the engine hardware of its own.</summary>
+    [ObservableProperty]
+    public partial bool GrantProvideHardware { get; set; }
+
+    partial void OnGrantProvideHardwareChanged(bool value) => OnPropertyChanged(nameof(CanApply));
 
     /// <summary>The fans, with a tick against the ones this plugin has.</summary>
     public ObservableCollection<GrantedFanViewModel> Fans { get; } = [];
@@ -190,6 +226,11 @@ public sealed partial class PluginCardViewModel : ObservableObject
     };
 
     /// <summary>What it may do, in words rather than enum names.</summary>
+    /// <remarks>
+    /// Built only from what this plugin actually asked for. A plugin that never requested
+    /// <see cref="PluginCapability.ControlFans"/> has no fans to speak of, and saying "can drive no
+    /// fans" about it is not a fact worth stating — it reads as a problem where there is none.
+    /// </remarks>
     public string GrantsText
     {
         get
@@ -199,33 +240,66 @@ public sealed partial class PluginCardViewModel : ObservableObject
                 return "Nothing granted yet.";
             }
 
-            var reads = Summary.Granted.Contains(PluginCapability.ReadSensors)
-                ? "may read sensors"
-                : "may not read sensors";
+            var parts = new List<string>(3);
 
-            var fans = Summary.Controls.Count switch
+            if (WantsReadSensors)
             {
-                0 => "no fans",
-                1 => "one fan",
-                var count => $"{count} fans",
-            };
+                parts.Add(Summary.Granted.Contains(PluginCapability.ReadSensors)
+                    ? "may read sensors"
+                    : "may not read sensors");
+            }
 
-            return $"Can drive {fans}, and {reads}.";
+            if (WantsControlFans)
+            {
+                parts.Add(Summary.Controls.Count switch
+                {
+                    0 => "can drive no fans",
+                    1 => "can drive one fan",
+                    var count => $"can drive {count} fans",
+                });
+            }
+
+            if (WantsHardwareProvision)
+            {
+                parts.Add(Summary.Granted.Contains(PluginCapability.ProvideHardware)
+                    ? "may offer the engine its own hardware"
+                    : "may not offer the engine its own hardware");
+            }
+
+            if (parts.Count == 0)
+            {
+                return "Approved, but asked for nothing.";
+            }
+
+            var sentence = string.Join(", and ", parts);
+            return char.ToUpperInvariant(sentence[0]) + sentence[1..] + ".";
         }
     }
 
     /// <summary>Where it last ran from, for the user to recognise or not.</summary>
     public string ProgramText => Summary.ImagePath ?? "Impeller could not identify the program.";
 
+    /// <summary>Whether it asked to offer the engine hardware of its own, so the tick box is worth showing.</summary>
+    public bool WantsHardwareProvision =>
+        Summary.Granted.Contains(PluginCapability.ProvideHardware)
+        || Summary.Requested.Contains(PluginCapability.ProvideHardware);
+
     /// <summary>
-    /// Whether this plugin asked for something the engine does not implement.
+    /// Whether pressing Apply would change anything.
     /// </summary>
     /// <remarks>
-    /// Said out loud rather than shown as an ungranted request, so nobody spends an evening trying
-    /// to work out which tick box turns it on.
+    /// A plugin still <see cref="PluginAdmissionState.Pending"/> can always be applied — approving
+    /// it for the first time is a real action even when every box is left unticked, since Pending
+    /// and Approved-with-nothing-granted are different states. Past that first approval, the button
+    /// does nothing useful once the ticks already match what the engine has, and a button that can
+    /// always be pressed teaches nobody that pressing it does anything.
     /// </remarks>
-    public bool WantsHardwareProvision =>
-        Summary.Requested.Contains(PluginCapability.ProvideHardware);
+    public bool CanApply =>
+        Summary.State == PluginAdmissionState.Pending
+        || GrantReadSensors != Summary.Granted.Contains(PluginCapability.ReadSensors)
+        || GrantProvideHardware != Summary.Granted.Contains(PluginCapability.ProvideHardware)
+        || !new HashSet<SensorId>(Fans.Where(fan => fan.Granted && fan.Claimable).Select(fan => fan.Id))
+            .SetEquals(Summary.Controls);
 
     /// <summary>Approves the plugin with whatever is currently ticked.</summary>
     [RelayCommand]

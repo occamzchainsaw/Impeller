@@ -267,11 +267,16 @@ public sealed partial class PluginsViewModel(EngineConnection connection, Notifi
             capabilities.Add(PluginCapability.ControlFans);
         }
 
+        if (card.GrantProvideHardware)
+        {
+            capabilities.Add(PluginCapability.ProvideHardware);
+        }
+
         await engine
             .ApprovePluginAsync(card.Id, [.. capabilities], [.. granted.Select(fan => fan.Id)])
             .ConfigureAwait(true);
 
-        return Describe(card.GrantReadSensors, granted);
+        return Describe(card.GrantReadSensors, granted, card.GrantProvideHardware);
     }
 
     /// <summary>
@@ -281,26 +286,32 @@ public sealed partial class PluginsViewModel(EngineConnection connection, Notifi
     /// "May drive 3 fans" is not a confirmation anybody can check. The whole value of saying it back
     /// is that a user who ticked the wrong box can see they did.
     /// </remarks>
-    private static string Describe(bool reads, GrantedFanViewModel[] fans)
+    private static string Describe(bool reads, GrantedFanViewModel[] fans, bool providesHardware)
     {
-        var parts = new List<string>(2);
+        var parts = new List<string>(3);
 
         if (reads)
         {
-            parts.Add("May read this machine's sensors");
+            parts.Add("may read this machine's sensors");
         }
 
-        parts.Add(fans.Length == 0
-            ? "may drive no fans"
-            : "may drive " + string.Join(", ", fans.Select(fan => fan.Name)));
-
-        // Only capitalised when the reads clause did not already open the sentence.
-        if (!reads)
+        if (fans.Length > 0)
         {
-            parts[0] = char.ToUpperInvariant(parts[0][0]) + parts[0][1..];
+            parts.Add("may drive " + string.Join(", ", fans.Select(fan => fan.Name)));
         }
 
-        return string.Join(", and ", parts) + ".";
+        if (providesHardware)
+        {
+            parts.Add("may offer the engine its own hardware");
+        }
+
+        if (parts.Count == 0)
+        {
+            return "Nothing was granted.";
+        }
+
+        var sentence = string.Join(", and ", parts);
+        return char.ToUpperInvariant(sentence[0]) + sentence[1..] + ".";
     }
 
     private void OnPluginsChanged(object? sender, EventArgs e) => _ = RefreshAsync();

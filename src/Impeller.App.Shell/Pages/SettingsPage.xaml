@@ -214,11 +214,11 @@
                         worse than one that is plainly unavailable.
                     -->
                     <ToggleSwitch
-                        Header="And leave it in the notification area"
+                        Header="Start minimised"
                         IsEnabled="{x:Bind ViewModel.StartsWithWindows, Mode=OneWay}"
                         IsOn="{x:Bind ViewModel.StartsMinimised, Mode=TwoWay}"
-                        OffContent="Open the window"
-                        OnContent="Tray only" />
+                        OffContent="No"
+                        OnContent="Yes" />
 
                     <TextBlock
                         FontSize="12"

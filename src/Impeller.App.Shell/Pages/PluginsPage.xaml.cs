@@ -29,6 +29,9 @@ public sealed partial class PluginsPage : Page
     /// <summary>Whether the card has an id at all, which is what makes Apply meaningful.</summary>
     public static bool HasText(string? text) => !string.IsNullOrWhiteSpace(text);
 
+    /// <summary>Whether Apply should be pressable: an id to apply to, and something for it to do.</summary>
+    public static bool CanApply(bool canApply, string? id) => canApply && HasText(id);
+
     /// <summary>Shown when the condition holds.</summary>
     public static Visibility When(bool condition) =>
         condition ? Visibility.Visible : Visibility.Collapsed;
